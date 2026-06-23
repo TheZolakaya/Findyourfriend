@@ -208,8 +208,8 @@ function LiveToggle({
         </label>
       ) : (
         <p className="text-stone-500">
-          Running in <strong>sample mode</strong> — no API key found. Add <code>ANTHROPIC_API_KEY</code>{' '}
-          to <code>.env</code> and restart to enable live AI recipes.
+          Showing <strong>instant sample plans</strong>. Live AI-generated recipes can be switched on
+          later.
         </p>
       )}
     </div>
