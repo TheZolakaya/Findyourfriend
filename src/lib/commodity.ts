@@ -65,6 +65,8 @@ const COMMODITIES: Commodity[] = [
   { match: ['bean sprout'], buy: 'bag', conv: { cup: 0.25 }, step: 1 },
   { match: ['sauerkraut'], buy: 'jar', conv: { cup: 1, '': 1 }, step: 1 },
   { match: ['lettuce', 'romaine', 'arugula'], buy: 'head', plural: 'heads', conv: { large: 1 / 8, cup: 0.25, '': 1 / 8 }, step: 1 },
+  { match: ['cilantro', 'parsley', 'dill', 'basil', 'mint'], buy: 'bunch', plural: 'bunches', conv: { tbsp: 1 / 12, cup: 1, '': 1 }, step: 1 },
+  { match: ['garlic'], buy: 'head', plural: 'heads', conv: { clove: 1 / 10, tbsp: 1 / 6, '': 1 / 10 }, step: 1 },
 ]
 
 function normUnit(u: string): string {

@@ -53,4 +53,8 @@ describe('purchaseFor', () => {
   it('does not treat "X, diced" as compound', () => {
     expect(purchaseFor('Cucumber, sliced', [{ unit: 'medium', qty: 1 }])).toBe('1 cucumber')
   })
+
+  it('buys fresh herbs by the bunch', () => {
+    expect(purchaseFor('Cilantro, chopped', [{ unit: 'tbsp', qty: 4 }])).toBe('1 bunch')
+  })
 })
