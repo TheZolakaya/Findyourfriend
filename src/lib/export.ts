@@ -50,7 +50,11 @@ export function planToMarkdown(name: string, profile: Profile, targets: Targets,
   out.push('')
   for (const group of grocery.fresh) {
     out.push(`#### ${cap(group.category)}`)
-    for (const it of group.items) out.push(`- [ ] ${it.amount} — ${it.item} _(${reuseNote(it)})_`)
+    for (const it of group.items) {
+      const lead = it.purchase ?? it.amount
+      const detail = it.purchase ? `need ${it.amount}; ${reuseNote(it)}` : reuseNote(it)
+      out.push(`- [ ] ${lead} — ${it.item} _(${detail})_`)
+    }
     out.push('')
   }
   out.push('### Pantry & staples (buy if you don\'t have it — reusable)')

@@ -1,6 +1,7 @@
 import type { IngredientCategory, Plan } from './schema'
 import { INGREDIENT_CATEGORIES } from './schema'
 import { parseAmount } from './shoppingList'
+import { purchaseFor } from './commodity'
 
 /**
  * Smart grocery list.
@@ -82,7 +83,8 @@ export interface GroceryItem {
   item: string
   category: IngredientCategory
   staple: boolean
-  amount: string // summed quantity for fresh; '' for staples (one purchase)
+  amount: string // summed recipe need for fresh; '' for staples (one purchase)
+  purchase: string | null // how you'd actually buy it ("2 dozen"); null if unknown
   days: number[] // plan days this item is used on
   mealCount: number // how many meals reuse it
   seasons: Season[] | null // produce only; null = unknown / year-round
@@ -144,17 +146,21 @@ export function buildGroceryList(
     const staple = isStapleCategory(b.category)
     const seasons = b.category === 'produce' ? seasonsForItem(b.item.toLowerCase()) : null
     let amount = ''
+    let purchase: string | null = null
     if (!staple) {
       const parts: string[] = []
       for (const [unit, qty] of b.byUnit) parts.push(unit ? `${formatQty(qty)} ${unit}` : formatQty(qty))
       parts.push(...dedupe(b.extras))
       amount = parts.join(' + ') || '—'
+      const quantities = [...b.byUnit.entries()].map(([unit, qty]) => ({ unit, qty }))
+      purchase = purchaseFor(b.item, quantities)
     }
     items.push({
       item: b.item,
       category: b.category,
       staple,
       amount,
+      purchase,
       days: [...b.days].sort((a, c) => a - c),
       mealCount: b.mealCount,
       seasons,

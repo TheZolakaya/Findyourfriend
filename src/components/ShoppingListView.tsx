@@ -54,9 +54,12 @@ export function ShoppingListView({ plan }: { plan: Plan }) {
                           onChange={() => toggleCheck(key)}
                         />
                         <span className={checked[key] ? 'line-through text-stone-400' : ''}>
-                          <span className="text-stone-500">{it.amount}</span> · {it.item}
+                          <span className="font-medium">{it.purchase ?? it.amount}</span> · {it.item}
                           {it.inSeason === true && <span className="ml-1" title="in season">🌿</span>}
-                          <span className="block text-xs text-stone-400">{reuseNote(it)}</span>
+                          <span className="block text-xs text-stone-400">
+                            {it.purchase ? `need ${it.amount} · ` : ''}
+                            {reuseNote(it)}
+                          </span>
                         </span>
                       </label>
                     </li>
