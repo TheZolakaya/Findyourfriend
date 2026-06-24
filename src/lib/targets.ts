@@ -73,6 +73,12 @@ export interface ProtocolRule {
 }
 
 export const PROTOCOL_RULES: Record<Protocol, ProtocolRule> = {
+  phase1: {
+    label: 'Homemade Protocol — Phase 1',
+    blurb: 'High-protein, very-low-carb, low-fat (PSMF / Ideal Protein style). Protein anchored to your goal weight.',
+    proteinPerKg: 1.5, // applied to GOAL weight in the Phase 1 branch below
+    fatPctOfCalories: 0, // unused — Phase 1 fixes fat low rather than as a %
+  },
   balanced: {
     label: 'Balanced / flexible',
     blurb: 'Even split across protein, carbs, and fat.',
@@ -134,6 +140,58 @@ export function goalDelta(goal: Goal, pace: Pace): number {
 }
 
 const round = (n: number): number => Math.round(n)
+const clamp = (n: number, min: number, max: number): number => Math.max(min, Math.min(max, n))
+
+/**
+ * Phase 1 (PSMF / Ideal Protein-style) is a different philosophy from
+ * maintenance-minus-a-deficit: protein is anchored to the GOAL weight, carbs
+ * and fat are held deliberately low, and calories simply fall out of the
+ * macros (an intentional very-low-calorie target). Modeled on Chris's
+ * "Homemade Protocol — Phase 1".
+ */
+function computePhase1Targets(profile: Profile, tolerancePct: number): Targets {
+  const proteinG = clamp(round(1.5 * profile.goalWeightKg), 150, 185)
+  const carbsG = 35 // net carbs, all from approved veg
+  const fatG = 45 // minimal — rides along with lean protein + 1–2 tsp oil
+  const calories = proteinG * KCAL_PER_G.protein + carbsG * KCAL_PER_G.carbs + fatG * KCAL_PER_G.fat
+
+  const bmr = mifflinStJeorBMR({
+    sex: profile.sex,
+    weightKg: profile.currentWeightKg,
+    heightCm: profile.heightCm,
+    age: profile.age,
+  })
+  const maintenance = tdee(bmr, profile.activityLevel)
+
+  const steps = [
+    'Phase 1 is a protein-sparing modified fast — protein is anchored to your GOAL weight, not to maintenance calories.',
+    `Protein: ~1.5 g/kg of goal weight (${profile.goalWeightKg.toFixed(1)} kg) = ${proteinG} g/day (held in the 150–185 g band).`,
+    `Net carbs capped low: ${carbsG} g/day, all from approved vegetables.`,
+    `Fat kept minimal: ${fatG} g/day — mostly what rides along with lean protein, plus 1–2 tsp permitted oil.`,
+    `Calories follow from the macros: ${proteinG}×4 + ${carbsG}×4 + ${fatG}×9 ≈ ${round(calories)} kcal/day — an intentional VLCD (≈${round(
+      maintenance - calories,
+    )} kcal below your estimated maintenance of ${round(maintenance)}).`,
+    'This is a deliberate very-low-calorie protocol — confirm timing with your doctor, especially around any recent surgery.',
+  ]
+
+  return {
+    calories: round(calories),
+    protein_g: proteinG,
+    carbs_g: carbsG,
+    fat_g: fatG,
+    source: 'computed',
+    tolerance_pct: tolerancePct,
+    breakdown: {
+      bmr: round(bmr),
+      activityFactor: ACTIVITY_FACTORS[profile.activityLevel],
+      tdee: round(maintenance),
+      goalDelta: round(calories - maintenance),
+      proteinPerKg: 1.5,
+      fatPctOfCalories: (fatG * KCAL_PER_G.fat) / calories,
+      steps,
+    },
+  }
+}
 
 /**
  * Compute full daily targets from a profile.
@@ -141,6 +199,8 @@ const round = (n: number): number => Math.round(n)
  * black box.
  */
 export function computeTargets(profile: Profile, tolerancePct = 10): Targets {
+  if (profile.protocol === 'phase1') return computePhase1Targets(profile, tolerancePct)
+
   const bmr = mifflinStJeorBMR({
     sex: profile.sex,
     weightKg: profile.currentWeightKg,

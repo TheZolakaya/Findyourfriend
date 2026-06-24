@@ -7,6 +7,7 @@ import {
   type Targets,
 } from './schema'
 import { makeMockMeal, makeMockPlan } from './fixtures'
+import { assemblePlan, assembleSwap, hasLibrary } from './library'
 
 /**
  * The generation service is hidden behind an interface so the UI can run on
@@ -43,10 +44,14 @@ export const mockService: GenerateService = {
   async generatePlan({ profile, targets, days }) {
     // Tiny delay so the UI's loading states are exercised.
     await delay(350)
+    // Prefer the curated recipe library when this protocol has one (real
+    // recipes); otherwise fall back to generic placeholder plans.
+    if (hasLibrary(profile.protocol)) return assemblePlan(profile, targets, days)
     return makeMockPlan(profile, targets, days)
   },
   async swapMeal({ profile, targets, meal }) {
     await delay(250)
+    if (hasLibrary(profile.protocol)) return assembleSwap(profile, targets, meal)
     return makeMockMeal(profile, targets, meal)
   },
 }

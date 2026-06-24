@@ -26,6 +26,7 @@ export const GOALS = ['lose', 'maintain', 'gain'] as const
 export const PACES = ['easy', 'steady', 'aggressive'] as const
 export const DIETS = ['omnivore', 'vegetarian', 'vegan', 'pescatarian'] as const
 export const PROTOCOLS = [
+  'phase1',
   'balanced',
   'high_protein_low_carb',
   'mediterranean',
