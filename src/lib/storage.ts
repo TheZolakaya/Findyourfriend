@@ -86,3 +86,27 @@ export function deletePlan(id: string): SavedPlan[] {
 export function newId(): string {
   return `plan_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`
 }
+
+// --- Pantry (staples the user already owns) ---------------------------------
+// Stored as lower-cased item names so they persist across plans.
+
+const PANTRY_KEY = 'mealforge.pantry.v1'
+
+export function pantryKey(item: string): string {
+  return item.trim().toLowerCase()
+}
+
+export function loadPantry(): string[] {
+  const arr = readJson(PANTRY_KEY)
+  return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []
+}
+
+export function togglePantry(item: string): string[] {
+  const key = pantryKey(item)
+  const owned = new Set(loadPantry())
+  if (owned.has(key)) owned.delete(key)
+  else owned.add(key)
+  const next = [...owned]
+  writeJson(PANTRY_KEY, next)
+  return next
+}

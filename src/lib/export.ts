@@ -1,5 +1,5 @@
 import type { Plan, Profile, Targets } from './schema'
-import { buildShoppingList, groupByCategory } from './shoppingList'
+import { buildGroceryList, reuseNote, SEASON_LABEL } from './grocery'
 import { MEAL_SLOTS } from './schema'
 
 /** Render a full plan (targets + days + shopping list) as Markdown. */
@@ -39,13 +39,24 @@ export function planToMarkdown(name: string, profile: Profile, targets: Targets,
     }
   }
 
+  const grocery = buildGroceryList(plan)
   out.push('## Shopping list')
   out.push('')
-  for (const group of groupByCategory(buildShoppingList(plan))) {
-    out.push(`### ${cap(group.category)}`)
-    for (const it of group.items) out.push(`- [ ] ${it.totalAmount} — ${it.item}`)
+  if (grocery.inSeasonNow.length) {
+    out.push(`_In season now (${SEASON_LABEL[grocery.season]}): ${[...new Set(grocery.inSeasonNow)].join(', ')}_`)
     out.push('')
   }
+  out.push('### Fresh — buy for this week')
+  out.push('')
+  for (const group of grocery.fresh) {
+    out.push(`#### ${cap(group.category)}`)
+    for (const it of group.items) out.push(`- [ ] ${it.amount} — ${it.item} _(${reuseNote(it)})_`)
+    out.push('')
+  }
+  out.push('### Pantry & staples (buy if you don\'t have it — reusable)')
+  out.push('')
+  for (const it of grocery.staples) out.push(`- [ ] ${it.item} _(${reuseNote(it)})_`)
+  out.push('')
 
   return out.join('\n')
 }
