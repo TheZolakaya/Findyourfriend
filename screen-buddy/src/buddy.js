@@ -207,7 +207,7 @@ function notFoundMessage(sessionId, cwd) {
 function defaultRun(bin, args, cwd) {
   const { execFile } = require("child_process");
   return new Promise((resolve, reject) => {
-    const child = execFile(bin, args, { cwd, timeout: 5 * 60 * 1000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const child = execFile(bin, args, { cwd, timeout: 5 * 60 * 1000, maxBuffer: 10 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
       if (/No conversation found/i.test(stderr || "") || /No conversation found/i.test(stdout || "")) {
         const i = args.indexOf("--resume");
         return reject(new Error(notFoundMessage(i >= 0 ? args[i + 1] : null, cwd)));
