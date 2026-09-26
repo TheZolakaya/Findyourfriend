@@ -68,21 +68,25 @@ function renderDot() {
   dot.title = thinking ? "Looking…" : settings.paused ? "Paused" : "Watching";
 }
 
-async function sendMessage() {
+// withShot: also capture the screen and send it along (📸 / Ctrl+Enter).
+async function sendMessage(withShot) {
   const text = input.value.trim();
+  if (!text && !withShot) return; // nothing to send
+  if (thinking) return addStatus("Still thinking about the last one…");
   input.value = "";
-  addMessage({ who: "me", text: text || "📸 (what do you think?)" });
-  await window.buddy.send(text);
+  addMessage({ who: "me", text: (withShot ? "📸 " : "") + (text || "(what do you think?)") });
+  await window.buddy.send(text, withShot);
 }
 
 $("composer").addEventListener("submit", (e) => {
   e.preventDefault();
-  sendMessage();
+  sendMessage(false);
 });
+$("shotBtn").addEventListener("click", () => sendMessage(true));
 input.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
-    sendMessage();
+    sendMessage(e.ctrlKey || e.metaKey);
   }
 });
 input.addEventListener("focus", () => ($("badge").hidden = true));
@@ -155,6 +159,7 @@ window.buddy.onThinking((t) => {
   thinking = t;
   if (!t) clearLive();
   $("sendBtn").disabled = t;
+  $("shotBtn").disabled = t;
   renderDot();
 });
 window.buddy.onSettings((s) => {

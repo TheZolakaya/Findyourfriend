@@ -184,8 +184,9 @@ function appendLog(entry) {
   fs.appendFileSync(LOG_FILE, JSON.stringify(entry) + "\n");
 }
 
-// kind: "user" (you sent a message) | "auto" (timer check-in)
-async function checkIn(kind, message = "") {
+// kind: "user" (you sent a message) | "auto" (timer check-in).
+// withShot: whether to capture and attach the screen (always for "auto").
+async function checkIn(kind, message = "", { withShot = true } = {}) {
   if (busy) {
     if (kind === "user") send("buddy:status", { text: "Still thinking about the last one…" });
     return;
@@ -193,19 +194,22 @@ async function checkIn(kind, message = "") {
   busy = true;
   send("buddy:thinking", true);
   try {
-    const image = await captureScreen();
-
-    const tiny = toGray(image.resize({ width: 64, height: 36 }).toBitmap());
-    const changed = frameDiff(tiny, lastFrame) >= CHANGE_THRESHOLD;
-    lastFrame = tiny;
-    if (kind === "auto" && !changed) return; // nothing new to look at
-
-    fs.mkdirSync(SHOTS_DIR, { recursive: true });
     const when = new Date();
-    const file = path.join(SHOTS_DIR, `${stamp(when)}_${kind}.png`);
-    fs.writeFileSync(file, image.toPNG());
+    let file = null;
+    let jpegBase64 = null;
+    if (kind === "auto" || withShot) {
+      const image = await captureScreen();
 
-    const jpegBase64 = image.toJPEG(80).toString("base64");
+      const tiny = toGray(image.resize({ width: 64, height: 36 }).toBitmap());
+      const changed = frameDiff(tiny, lastFrame) >= CHANGE_THRESHOLD;
+      lastFrame = tiny;
+      if (kind === "auto" && !changed) return; // nothing new to look at
+
+      fs.mkdirSync(SHOTS_DIR, { recursive: true });
+      file = path.join(SHOTS_DIR, `${stamp(when)}_${kind}.png`);
+      fs.writeFileSync(file, image.toPNG());
+      jpegBase64 = image.toJPEG(80).toString("base64");
+    }
 
     const { text, quiet } = await buddy.look({
       kind,
@@ -217,6 +221,7 @@ async function checkIn(kind, message = "") {
       // don't stream: most of them end up quiet.
       onText: kind === "user" ? (t) => send("buddy:delta", { text: t }) : undefined,
     });
+    fs.mkdirSync(SHOTS_DIR, { recursive: true });
     appendLog({ at: when.toISOString(), kind, file, message: message || null, reply: text, quiet });
 
     if (quiet) {
@@ -275,7 +280,9 @@ ipcMain.handle("buddy:set-settings", (_e, patch) => {
   schedule();
   return settings;
 });
-ipcMain.handle("buddy:send", (_e, message) => checkIn("user", String(message || "").trim() || "What do you think?"));
+ipcMain.handle("buddy:send", (_e, message, withShot) =>
+  checkIn("user", String(message || "").trim() || (withShot ? "What do you think?" : "Hey"), { withShot: Boolean(withShot) }),
+);
 ipcMain.handle("buddy:check-now", () => {
   lastFrame = null; // force a real look
   return checkIn("auto");
