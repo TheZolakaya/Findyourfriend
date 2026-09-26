@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+    <title>Screen Buddy</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="panel">
+      <header class="bar">
+        <span class="dot" id="dot" title="Watching"></span>
+        <span class="title">Screen Buddy</span>
+        <span class="badge" id="badge" hidden>new</span>
+        <span class="spacer"></span>
+        <button class="icon" id="pause" title="Pause auto check-ins">⏸</button>
+        <button class="icon" id="collapse" title="Collapse">▁</button>
+        <button class="icon" id="hide" title="Hide (bring back with hotkey)">✕</button>
+      </header>
+
+      <div class="controls">
+        <label>
+          Look every
+          <select id="interval">
+            <option value="0">never</option>
+            <option value="1">1 min</option>
+            <option value="2">2 min</option>
+            <option value="5">5 min</option>
+            <option value="10">10 min</option>
+            <option value="15">15 min</option>
+            <option value="30">30 min</option>
+          </select>
+        </label>
+        <button class="link" id="checkNow">Look now</button>
+        <button class="link" id="folder">Screenshots</button>
+      </div>
+
+      <main class="log" id="log"></main>
+
+      <form class="composer" id="composer">
+        <textarea id="input" rows="2" placeholder="Ask about what's on your screen… (Enter to send)"></textarea>
+        <button type="submit" id="sendBtn" title="Take a screenshot and send">📸</button>
+      </form>
+      <div class="footer" id="footer"></div>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
