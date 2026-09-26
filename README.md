@@ -93,3 +93,10 @@ src/store.ts             Zustand app state
 > MealForge gives general estimates. If you have a medical condition, are
 > pregnant, or have a history that warrants individualized guidance, check your
 > targets with a doctor or registered dietitian.
+
+---
+
+## Also in this repo: 👀 Screen Buddy
+
+`screen-buddy/` is a separate always-on-top desktop app. It's an AI buddy that
+looks at your screen and chats about it. See [screen-buddy/README.md](screen-buddy/README.md).
