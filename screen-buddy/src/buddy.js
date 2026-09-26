@@ -159,7 +159,12 @@ function defaultRun(bin, args, cwd) {
   return new Promise((resolve, reject) => {
     execFile(bin, args, { cwd, timeout: 5 * 60 * 1000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err && !stdout) {
-        const hint = err.code === "ENOENT" ? " (is Claude Code installed and on your PATH?)" : "";
+        const hint =
+          err.code === "ENOENT" || err.code === "EINVAL"
+            ? process.platform === "win32"
+              ? " (install Claude Code with the native installer so claude.exe exists, or set SCREEN_BUDDY_CLAUDE_BIN to its full path)"
+              : " (is Claude Code installed and on your PATH?)"
+            : "";
         return reject(new Error(`claude failed${hint}: ${stderr || err.message}`));
       }
       resolve(stdout);

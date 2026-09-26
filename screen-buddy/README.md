@@ -40,7 +40,9 @@ instead of starting its own chat. That Claude keeps everything it already knows
 about your project and your conversation. That session can even be one you
 started on claude.ai/code and pulled onto your computer with `claude --teleport`.
 
-1. Install Claude Code: `npm install -g @anthropic-ai/claude-code`
+1. Install Claude Code. Windows (PowerShell): `irm https://claude.ai/install.ps1 | iex`
+   (use this native installer, which gives you `claude.exe`, not the npm package).
+   Mac/Linux: `curl -fsSL https://claude.ai/install.sh | bash`
 2. Open the session in your project folder: `claude --teleport <web session id>`
    for a web session, or `claude --resume` to pick a local one.
 3. Inside it, run `/status` and copy the **Session ID**. Then exit.

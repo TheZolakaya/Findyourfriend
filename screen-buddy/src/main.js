@@ -241,6 +241,9 @@ ipcMain.on("buddy:collapse", (_e, collapsed) => {
 ipcMain.on("buddy:hide", () => win?.hide());
 ipcMain.on("buddy:quit", () => app.quit());
 
+// Windows needs an app ID for desktop notifications to show.
+if (process.platform === "win32") app.setAppUserModelId("com.screenbuddy.app");
+
 app.whenReady().then(() => {
   createWindow();
   schedule();
