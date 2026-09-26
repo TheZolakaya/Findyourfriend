@@ -16,6 +16,10 @@ now and then, and chats with you about it.
 - **Adjustable panel.** A−/A+ (or Ctrl −/+, Ctrl 0 to reset) changes only
   the chat text size. The window − ▢ + buttons (or Ctrl+Shift −/+) resize the
   window. The ◐ slider makes the panel see-through. All of these are remembered.
+- **Detail level.** Screenshots are captured at the size you pick in the
+  panel, not full 4K: Low (1024 wide, ≈800 tokens each), 720p (1280, ≈1.2k,
+  the default), High (1568, ≈1.8k) or 1080p (1920, ≈2.8k). Smaller uses up
+  less of your buddy's context; larger keeps small text readable.
 - **Everything goes to a file.** Each screenshot is saved as a PNG in
   `~/ScreenBuddy/`. `log.jsonl` there records every message, reply, and
   screenshot path.
@@ -57,8 +61,24 @@ started on claude.ai/code and pulled onto your computer with `claude --teleport`
    ```
 5. `npm start`. The footer should read "Claude Code session …".
 
-Each message runs `claude -p "<message + screenshot path>" --resume <id>`.
-Claude opens the screenshot with its Read tool, and only Read is allowed.
+How it talks to the session:
+
+- **One running `claude`.** It starts when Screen Buddy opens (`claude -p
+  --resume <id> --input-format stream-json --output-format stream-json`) and
+  every message goes into that same process. There's no startup wait per
+  message, and follow-ups come back in a few seconds.
+- **The screenshot goes in with the message** as an image, so Claude doesn't
+  need a Read-tool round trip to see it. Only the Read tool is allowed, for
+  looking back at older screenshots.
+- **Replies stream** into the panel as they're written.
+- **The session is released cleanly.** When you quit (✕ then Ctrl+C in the
+  terminal, or closing the app), Screen Buddy closes `claude`'s input so it
+  saves and exits on its own; it's force-stopped only if it hangs for 5 seconds.
+  After 10 idle minutes it's also shut down, freeing the session for VS Code;
+  the next message starts it again.
+- The first message after starting is the slowest, because Claude has to load
+  the whole session. A long session is slower to load.
+
 Tip: set the check-in interval to "never" or 15+ minutes, because every
 check-in is added to that session's history.
 
@@ -87,7 +107,7 @@ you hit Enter ───────┘                                          
   last one. If the screen hasn't changed, no API call is made.
 - **Only the current screenshot is sent.** Older turns are kept as text memory
   (last 20 exchanges), so the context doesn't fill up with images.
-- Screenshots are downscaled to 1568px wide and sent as JPEG. Auto check-ins
+- Screenshots are captured at the Detail size you choose (720p by default) and sent as JPEG. Auto check-ins
   use `low` effort and your messages use `medium`.
 
 ### Privacy
@@ -112,6 +132,8 @@ you hit Enter ───────┘                                          
 | `SCREEN_BUDDY_BACKEND` | `api` | `claude-code` to talk to a Claude Code session |
 | `SCREEN_BUDDY_SESSION` | `latest` | Session ID for the `claude-code` backend, or `latest` |
 | `SCREEN_BUDDY_PROJECT_DIR` | cwd | Folder that session lives in |
+| `SCREEN_BUDDY_CLAUDE_MODEL` | session's model | e.g. `sonnet` for faster replies |
+| `SCREEN_BUDDY_IDLE_MIN` | `10` | Minutes idle before `claude` is shut down (0 = never) |
 
 The check-in interval and pause state are saved between runs.
 

@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("buddy", {
   setOpacity: (value) => ipcRenderer.invoke("buddy:opacity", value),
   quit: () => ipcRenderer.send("buddy:quit"),
   onReply: on("buddy:reply"),
+  onDelta: on("buddy:delta"),
   onStatus: on("buddy:status"),
   onError: on("buddy:error"),
   onThinking: on("buddy:thinking"),

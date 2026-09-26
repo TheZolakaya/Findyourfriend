@@ -13,16 +13,15 @@ const {
 require("dotenv").config({ path: path.join(__dirname, "..", ".env"), quiet: true });
 
 const { Buddy, ClaudeCodeBuddy } = require("./buddy");
-const { toGray, frameDiff } = require("./frames");
+const { toGray, frameDiff, captureSize, normalizeShotWidth, DEFAULT_SHOT_WIDTH } = require("./frames");
 
 const SHOTS_DIR = process.env.SCREEN_BUDDY_DIR || path.join(app.getPath("home"), "ScreenBuddy");
 const SETTINGS_FILE = path.join(app.getPath("userData"), "settings.json");
 const LOG_FILE = path.join(SHOTS_DIR, "log.jsonl");
 const HOTKEY = "CommandOrControl+Shift+Space";
 const CHANGE_THRESHOLD = 2; // mean gray-level diff below this = "screen didn't change"
-const MAX_SEND_WIDTH = 1568; // long edge we send to the model
 
-const DEFAULTS = { intervalMin: 5, paused: false, textScale: 1.25, winW: 360, winH: 520, opacity: 1 };
+const DEFAULTS = { intervalMin: 5, paused: false, textScale: 1.25, winW: 360, winH: 520, opacity: 1, shotWidth: DEFAULT_SHOT_WIDTH };
 const OPACITY_MIN = 0.3; // never let the panel vanish completely
 const BAR_H = 44;
 const TEXT_MIN = 0.8;
@@ -44,6 +43,8 @@ const buddy = useClaudeCode
       cwd: process.env.SCREEN_BUDDY_PROJECT_DIR,
       shotsDir: SHOTS_DIR,
       bin: process.env.SCREEN_BUDDY_CLAUDE_BIN,
+      model: process.env.SCREEN_BUDDY_CLAUDE_MODEL,
+      idleMs: minutesEnv("SCREEN_BUDDY_IDLE_MIN", 10) * 60 * 1000,
     })
   : new Buddy({
       apiKey: process.env.ANTHROPIC_API_KEY,
@@ -54,6 +55,11 @@ const backendLabel = useClaudeCode
   : buddy.live
     ? "Live"
     : "Sample mode (no API key)";
+
+function minutesEnv(name, fallback) {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n >= 0 && process.env[name] !== "" ? n : fallback;
+}
 
 function loadSettings() {
   try {
@@ -153,7 +159,9 @@ async function captureScreen() {
   try {
     sources = await desktopCapturer.getSources({
       types: ["screen"],
-      thumbnailSize: { width: Math.round(width * scale), height: Math.round(height * scale) },
+      // Capture straight at the chosen detail level (e.g. 1280 wide) rather
+      // than full 4K: less to save, and less of the buddy's context per image.
+      thumbnailSize: captureSize(Math.round(width * scale), Math.round(height * scale), settings.shotWidth),
     });
   } finally {
     if (hideForCapture) win.showInactive();
@@ -197,8 +205,7 @@ async function checkIn(kind, message = "") {
     const file = path.join(SHOTS_DIR, `${stamp(when)}_${kind}.png`);
     fs.writeFileSync(file, image.toPNG());
 
-    const small = image.getSize().width > MAX_SEND_WIDTH ? image.resize({ width: MAX_SEND_WIDTH }) : image;
-    const jpegBase64 = small.toJPEG(80).toString("base64");
+    const jpegBase64 = image.toJPEG(80).toString("base64");
 
     const { text, quiet } = await buddy.look({
       kind,
@@ -206,6 +213,9 @@ async function checkIn(kind, message = "") {
       jpegBase64,
       file,
       when: when.toLocaleTimeString(),
+      // Stream your answers into the panel as they're written. Check-ins
+      // don't stream: most of them end up quiet.
+      onText: kind === "user" ? (t) => send("buddy:delta", { text: t }) : undefined,
     });
     appendLog({ at: when.toISOString(), kind, file, message: message || null, reply: text, quiet });
 
@@ -260,6 +270,7 @@ ipcMain.handle("buddy:get-settings", () => ({
 ipcMain.handle("buddy:set-settings", (_e, patch) => {
   settings = { ...settings, ...patch };
   settings.intervalMin = Math.max(0, Number(settings.intervalMin) || 0);
+  settings.shotWidth = normalizeShotWidth(settings.shotWidth);
   saveSettings();
   schedule();
   return settings;
@@ -296,6 +307,7 @@ if (process.platform === "win32") app.setAppUserModelId("com.screenbuddy.app");
 app.whenReady().then(() => {
   createWindow();
   schedule();
+  buddy.warm();
   globalShortcut.register(HOTKEY, () => {
     if (win?.isVisible() && win.isFocused()) win.hide();
     else showWindow();
@@ -304,3 +316,22 @@ app.whenReady().then(() => {
 
 app.on("will-quit", () => globalShortcut.unregisterAll());
 app.on("window-all-closed", () => app.quit());
+
+// Shut claude down properly before exiting, so the session is released
+// (e.g. for VS Code) instead of being left to a killed process.
+let shutdownDone = false;
+app.on("before-quit", (e) => {
+  if (shutdownDone) return;
+  e.preventDefault();
+  clearInterval(timer);
+  send("buddy:status", { text: "Closing Claude…" });
+  buddy
+    .close()
+    .catch(() => {})
+    .finally(() => {
+      shutdownDone = true;
+      app.quit();
+    });
+});
+// Ctrl+C in the terminal that ran `npm start`.
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => app.quit());

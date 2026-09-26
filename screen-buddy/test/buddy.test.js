@@ -89,40 +89,7 @@ test("frameDiff detects change", () => {
 
 const { ClaudeCodeBuddy } = require("../src/buddy");
 
-test("ClaudeCodeBuddy resumes the given session and points at the screenshot", async () => {
-  let call;
-  const b = new ClaudeCodeBuddy({
-    sessionId: "sess-123",
-    shotsDir: "/shots",
-    run: async (bin, args, cwd) => {
-      call = { bin, args, cwd };
-      return JSON.stringify({ type: "result", result: "I see a failing test.", session_id: "sess-123" });
-    },
-  });
-  const r = await b.look({ kind: "user", message: "what's wrong?", file: "/shots/a.png", when: "10:00" });
-  assert.deepStrictEqual(r, { text: "I see a failing test.", quiet: false });
-  assert.strictEqual(call.bin, "claude");
-  const a = call.args;
-  assert.strictEqual(a[a.indexOf("--resume") + 1], "sess-123");
-  assert.strictEqual(a[a.indexOf("--allowedTools") + 1], "Read");
-  assert.strictEqual(a[a.indexOf("--add-dir") + 1], "/shots");
-  const prompt = a[a.indexOf("-p") + 1];
-  assert.match(prompt, /what's wrong\?/);
-  assert.match(prompt, /\/shots\/a\.png/);
-});
 
-test("ClaudeCodeBuddy: quiet, errors, and session follow", async () => {
-  const b = new ClaudeCodeBuddy({
-    sessionId: "old",
-    run: async () => JSON.stringify({ result: "[quiet]", session_id: "new" }),
-  });
-  assert.strictEqual((await b.look({ kind: "auto", file: "x.png" })).quiet, true);
-  assert.strictEqual(b.sessionId, "new");
-
-  const bad = new ClaudeCodeBuddy({ sessionId: "s", run: async () => JSON.stringify({ is_error: true, result: "No conversation found" }) });
-  await assert.rejects(bad.look({ kind: "user", message: "hi", file: "x.png" }), /No conversation found/);
-  assert.strictEqual(new ClaudeCodeBuddy({}).sessionId, null);
-});
 
 const { findSessionCwd } = require("../src/buddy");
 const fs = require("fs");
@@ -141,24 +108,136 @@ test("findSessionCwd locates the folder a session was started in", () => {
   assert.strictEqual(findSessionCwd("missing", home), null);
   assert.strictEqual(findSessionCwd("abc-123", path.join(home, "nope")), null);
 
-  const b = new ClaudeCodeBuddy({ sessionId: "abc-123", cwd: "/wrong/place", claudeDir: home, run: async () => "{}" });
+  const b = new ClaudeCodeBuddy({ sessionId: "abc-123", cwd: "/wrong/place", claudeDir: home, });
   assert.strictEqual(b.cwd, "C:\\Users\\chris\\Findyourfriend");
 });
 
-test("ClaudeCodeBuddy 'latest' uses --continue, then pins the session", async () => {
-  const seen = [];
+
+// --- persistent Claude Code process (stream-json) ---
+
+const FAKE = path.join(__dirname, "fake-claude.js");
+function fakeBuddy(opts = {}, env = {}) {
+  const logFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "fake-")), "log.jsonl");
+  const { spawn } = require("child_process");
   const b = new ClaudeCodeBuddy({
-    sessionId: "latest",
-    cwd: "/proj",
-    run: async (bin, args, cwd) => {
-      seen.push({ args, cwd });
-      return JSON.stringify({ result: "hi", session_id: "pinned-1" });
-    },
+    sessionId: "sess-1",
+    bin: process.execPath,
+    binArgs: [FAKE],
+    idleMs: 0,
+    spawnFn: (bin, args, o) => spawn(bin, args, { ...o, env: { ...o.env, FAKE_LOG: logFile, ...env } }),
+    ...opts,
   });
-  await b.look({ kind: "user", message: "a", file: "x.png" });
-  await b.look({ kind: "user", message: "b", file: "x.png" });
-  assert.ok(seen[0].args.includes("--continue"));
-  assert.ok(!seen[0].args.includes("--resume"));
-  assert.strictEqual(seen[0].cwd, "/proj");
-  assert.strictEqual(seen[1].args[seen[1].args.indexOf("--resume") + 1], "pinned-1");
+  const events = () =>
+    fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").trim().split("\n").map((l) => JSON.parse(l)) : [];
+  return { b, events };
+}
+const shotArgs = { jpegBase64: "AAAA", file: "/shots/a.png", when: "10:00" };
+
+test("keeps one claude running across messages, sends the image inline, streams text", async () => {
+  const { b, events } = fakeBuddy();
+  const seen = [];
+  const r1 = await b.look({ kind: "user", message: "what's this?", ...shotArgs, onText: (t) => seen.push(t) });
+  assert.deepStrictEqual(r1, { text: "Hello there", quiet: false });
+  assert.deepStrictEqual(seen, ["Hello", "Hello ther", "Hello there"]);
+  const r2 = await b.look({ kind: "auto", ...shotArgs });
+  assert.strictEqual(r2.quiet, true);
+  await b.close();
+
+  const ev = events();
+  const starts = ev.filter((e) => e.event === "start");
+  assert.strictEqual(starts.length, 1, "only one claude process");
+  const a = starts[0].args;
+  assert.ok(a.includes("stream-json") && a.includes("--include-partial-messages"));
+  assert.strictEqual(a[a.indexOf("--resume") + 1], "sess-1");
+  const msgs = ev.filter((e) => e.event === "message");
+  assert.deepStrictEqual(msgs[0].types, ["image", "text"]);
+  assert.match(msgs[0].text, /what's this\?/);
+  assert.ok(ev.some((e) => e.event === "stdin-end"), "closed by ending stdin");
+});
+
+test("close() lets claude exit on its own and frees the process", async () => {
+  const { b, events } = fakeBuddy();
+  await b.look({ kind: "user", message: "hi", ...shotArgs });
+  assert.ok(b.running);
+  await b.close();
+  assert.ok(!b.running);
+  assert.ok(events().some((e) => e.event === "stdin-end"));
+  await b.close(); // second close is harmless
+});
+
+test("close() force-stops a claude that won't exit", async () => {
+  const { b } = fakeBuddy({}, { FAKE_IGNORE_EOF: "1" });
+  await b.look({ kind: "user", message: "hi", ...shotArgs });
+  const t = Date.now();
+  await b.close(300);
+  assert.ok(Date.now() - t < 2000);
+  assert.ok(!b.running);
+});
+
+test("a crash mid-reply is reported and the next message restarts claude", async () => {
+  const { b, events } = fakeBuddy();
+  await assert.rejects(b.look({ kind: "user", message: "crash please", ...shotArgs }), /stopped unexpectedly/);
+  const r = await b.look({ kind: "user", message: "hi again", ...shotArgs });
+  assert.strictEqual(r.text, "Hello there");
+  await b.close();
+  assert.strictEqual(events().filter((e) => e.event === "start").length, 2);
+});
+
+test("unknown session gives a helpful error", async () => {
+  const { b } = fakeBuddy({}, { FAKE_NOT_FOUND: "1" });
+  await assert.rejects(b.look({ kind: "user", message: "hi", ...shotArgs }), /can't find session sess-1/);
+});
+
+test("'latest' uses --continue, then pins the session it gets", async () => {
+  const { b, events } = fakeBuddy({ sessionId: "latest" });
+  await b.look({ kind: "user", message: "hi", ...shotArgs });
+  assert.strictEqual(b.sessionId, "sess-from-continue");
+  await b.close();
+  await b.look({ kind: "user", message: "again", ...shotArgs });
+  await b.close();
+  const starts = events().filter((e) => e.event === "start");
+  assert.ok(starts[0].args.includes("--continue"));
+  assert.strictEqual(starts[1].args[starts[1].args.indexOf("--resume") + 1], "sess-from-continue");
+});
+
+test("idle timeout shuts claude down to free the session", async () => {
+  const { b, events } = fakeBuddy({ idleMs: 150 });
+  await b.look({ kind: "user", message: "hi", ...shotArgs });
+  assert.ok(b.running);
+  await new Promise((r) => setTimeout(r, 600));
+  assert.ok(!b.running);
+  assert.ok(events().some((e) => e.event === "stdin-end"));
+});
+
+test("a second message while one is in flight is refused, not interleaved", async () => {
+  const { b } = fakeBuddy();
+  const first = b.look({ kind: "user", message: "one", ...shotArgs });
+  await assert.rejects(b.look({ kind: "user", message: "two", ...shotArgs }), /Still answering/);
+  await first;
+  await b.close();
+});
+
+test("child claude doesn't inherit a parent Claude Code session", () => {
+  const { childEnv } = require("../src/buddy");
+  const env = childEnv({ PATH: "/bin", CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "parent", CLAUDE_CONFIG_DIR: "/c" });
+  assert.deepStrictEqual(env, { PATH: "/bin", CLAUDE_CONFIG_DIR: "/c" });
+});
+
+test("warm() starts claude before the first message, and it gets reused", async () => {
+  const { b, events } = fakeBuddy();
+  b.warm();
+  assert.ok(b.running);
+  await b.look({ kind: "user", message: "hi", ...shotArgs });
+  await b.close();
+  assert.strictEqual(events().filter((e) => e.event === "start").length, 1);
+});
+
+test("captureSize caps width at the chosen detail level, keeps aspect, never upscales", () => {
+  const { captureSize, normalizeShotWidth } = require("../src/frames");
+  assert.deepStrictEqual(captureSize(3840, 2160, 1280), { width: 1280, height: 720 });
+  assert.deepStrictEqual(captureSize(3840, 2160, 1920), { width: 1920, height: 1080 });
+  assert.deepStrictEqual(captureSize(3440, 1440, 1024), { width: 1024, height: 429 });
+  assert.deepStrictEqual(captureSize(1366, 768, 1568), { width: 1366, height: 768 }); // small screen: as-is
+  assert.strictEqual(normalizeShotWidth("1568"), 1568);
+  assert.strictEqual(normalizeShotWidth(9999), 1280); // unknown -> default
 });
