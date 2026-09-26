@@ -12,7 +12,7 @@ const {
 } = require("electron");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env"), quiet: true });
 
-const { Buddy } = require("./buddy");
+const { Buddy, ClaudeCodeBuddy } = require("./buddy");
 const { toGray, frameDiff } = require("./frames");
 
 const SHOTS_DIR = process.env.SCREEN_BUDDY_DIR || path.join(app.getPath("home"), "ScreenBuddy");
@@ -29,10 +29,23 @@ let timer;
 let busy = false;
 let lastFrame = null;
 let settings = loadSettings();
-const buddy = new Buddy({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  model: process.env.SCREEN_BUDDY_MODEL,
-});
+const useClaudeCode = process.env.SCREEN_BUDDY_BACKEND === "claude-code";
+const buddy = useClaudeCode
+  ? new ClaudeCodeBuddy({
+      sessionId: process.env.SCREEN_BUDDY_SESSION,
+      cwd: process.env.SCREEN_BUDDY_PROJECT_DIR,
+      shotsDir: SHOTS_DIR,
+      bin: process.env.SCREEN_BUDDY_CLAUDE_BIN,
+    })
+  : new Buddy({
+      apiKey: process.env.ANTHROPIC_API_KEY,
+      model: process.env.SCREEN_BUDDY_MODEL,
+    });
+const backendLabel = useClaudeCode
+  ? `Claude Code session ${process.env.SCREEN_BUDDY_SESSION.slice(0, 8)}…`
+  : buddy.live
+    ? "Live"
+    : "Sample mode (no API key)";
 
 function loadSettings() {
   try {
@@ -190,12 +203,13 @@ function schedule() {
   if (!settings.paused && settings.intervalMin > 0) {
     timer = setInterval(() => checkIn("auto"), settings.intervalMin * 60 * 1000);
   }
-  send("buddy:settings", { ...settings, live: buddy.live, shotsDir: SHOTS_DIR, hotkey: HOTKEY });
+  send("buddy:settings", { ...settings, live: buddy.live, backendLabel, shotsDir: SHOTS_DIR, hotkey: HOTKEY });
 }
 
 ipcMain.handle("buddy:get-settings", () => ({
   ...settings,
   live: buddy.live,
+  backendLabel,
   shotsDir: SHOTS_DIR,
   hotkey: HOTKEY,
 }));

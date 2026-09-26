@@ -86,3 +86,40 @@ test("frameDiff detects change", () => {
   assert.ok(frameDiff(a, diff) > 50);
   assert.strictEqual(frameDiff(a, null), 255);
 });
+
+const { ClaudeCodeBuddy } = require("../src/buddy");
+
+test("ClaudeCodeBuddy resumes the given session and points at the screenshot", async () => {
+  let call;
+  const b = new ClaudeCodeBuddy({
+    sessionId: "sess-123",
+    shotsDir: "/shots",
+    run: async (bin, args, cwd) => {
+      call = { bin, args, cwd };
+      return JSON.stringify({ type: "result", result: "I see a failing test.", session_id: "sess-123" });
+    },
+  });
+  const r = await b.look({ kind: "user", message: "what's wrong?", file: "/shots/a.png", when: "10:00" });
+  assert.deepStrictEqual(r, { text: "I see a failing test.", quiet: false });
+  assert.strictEqual(call.bin, "claude");
+  const a = call.args;
+  assert.strictEqual(a[a.indexOf("--resume") + 1], "sess-123");
+  assert.strictEqual(a[a.indexOf("--allowedTools") + 1], "Read");
+  assert.strictEqual(a[a.indexOf("--add-dir") + 1], "/shots");
+  const prompt = a[a.indexOf("-p") + 1];
+  assert.match(prompt, /what's wrong\?/);
+  assert.match(prompt, /\/shots\/a\.png/);
+});
+
+test("ClaudeCodeBuddy: quiet, errors, and session follow", async () => {
+  const b = new ClaudeCodeBuddy({
+    sessionId: "old",
+    run: async () => JSON.stringify({ result: "[quiet]", session_id: "new" }),
+  });
+  assert.strictEqual((await b.look({ kind: "auto", file: "x.png" })).quiet, true);
+  assert.strictEqual(b.sessionId, "new");
+
+  const bad = new ClaudeCodeBuddy({ sessionId: "s", run: async () => JSON.stringify({ is_error: true, result: "No conversation found" }) });
+  await assert.rejects(bad.look({ kind: "user", message: "hi", file: "x.png" }), /No conversation found/);
+  assert.throws(() => new ClaudeCodeBuddy({}), /SCREEN_BUDDY_SESSION/);
+});

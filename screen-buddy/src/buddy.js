@@ -106,3 +106,65 @@ class Buddy {
 }
 
 module.exports = { Buddy, isQuiet, trimHistory, buildUserContent, QUIET_TOKEN, SYSTEM_PROMPT };
+
+// Sends each check-in into an existing Claude Code session (e.g. one you
+// teleported from claude.ai/code), so the buddy is *that* Claude, with its
+// memory of your project and conversation. Claude Code opens the screenshot
+// itself with its Read tool.
+class ClaudeCodeBuddy {
+  constructor({ sessionId, cwd, shotsDir, bin = "claude", run } = {}) {
+    if (!sessionId) throw new Error("SCREEN_BUDDY_SESSION is required for the claude-code backend");
+    this.sessionId = sessionId;
+    this.cwd = cwd || process.cwd();
+    this.shotsDir = shotsDir;
+    this.bin = bin;
+    this.run = run || defaultRun;
+    this.live = true;
+  }
+
+  args(prompt) {
+    const a = [
+      "-p", prompt,
+      "--resume", this.sessionId,
+      "--output-format", "json",
+      "--allowedTools", "Read",
+      "--append-system-prompt", SYSTEM_PROMPT,
+    ];
+    if (this.shotsDir) a.push("--add-dir", this.shotsDir);
+    return a;
+  }
+
+  async look({ kind, message, file, when = new Date().toLocaleTimeString() }) {
+    const head =
+      kind === "auto"
+        ? `[Screen Buddy] AUTO CHECK-IN at ${when}. Nobody asked you anything. Reply ${QUIET_TOKEN} unless something is worth saying.`
+        : `[Screen Buddy] USER MESSAGE at ${when}: ${message}`;
+    const prompt = `${head}\n\nScreenshot of my screen right now: ${file}\nOpen it with the Read tool before answering.`;
+    const out = await this.run(this.bin, this.args(prompt), this.cwd);
+    let parsed;
+    try {
+      parsed = JSON.parse(out);
+    } catch {
+      throw new Error(`Unexpected output from claude: ${out.slice(0, 200)}`);
+    }
+    if (parsed.is_error) throw new Error(parsed.result || "Claude Code returned an error");
+    if (parsed.session_id) this.sessionId = parsed.session_id; // follow the session if it moves
+    const text = String(parsed.result || "").trim() || QUIET_TOKEN;
+    return { text, quiet: isQuiet(text) };
+  }
+}
+
+function defaultRun(bin, args, cwd) {
+  const { execFile } = require("child_process");
+  return new Promise((resolve, reject) => {
+    execFile(bin, args, { cwd, timeout: 5 * 60 * 1000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err && !stdout) {
+        const hint = err.code === "ENOENT" ? " (is Claude Code installed and on your PATH?)" : "";
+        return reject(new Error(`claude failed${hint}: ${stderr || err.message}`));
+      }
+      resolve(stdout);
+    });
+  });
+}
+
+module.exports.ClaudeCodeBuddy = ClaudeCodeBuddy;

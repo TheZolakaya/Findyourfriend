@@ -33,6 +33,30 @@ but the replies are canned.
 → Privacy & Security → Screen Recording) to Electron / your terminal, then
 restart the app.
 
+## Talk to a specific Claude (Claude Code session)
+
+Screen Buddy can use one Claude Code session you already have as your buddy,
+instead of starting its own chat. That Claude keeps everything it already knows
+about your project and your conversation. That session can even be one you
+started on claude.ai/code and pulled onto your computer with `claude --teleport`.
+
+1. Install Claude Code: `npm install -g @anthropic-ai/claude-code`
+2. Open the session in your project folder: `claude --teleport <web session id>`
+   for a web session, or `claude --resume` to pick a local one.
+3. Inside it, run `/status` and copy the **Session ID**. Then exit.
+4. In `screen-buddy/.env`:
+   ```
+   SCREEN_BUDDY_BACKEND=claude-code
+   SCREEN_BUDDY_SESSION=<that session id>
+   SCREEN_BUDDY_PROJECT_DIR=/path/to/your/project
+   ```
+5. `npm start`. The footer should read "Claude Code session …".
+
+Each message runs `claude -p "<message + screenshot path>" --resume <id>`.
+Claude opens the screenshot with its Read tool, and only Read is allowed.
+Tip: set the check-in interval to "never" or 15+ minutes, because every
+check-in is added to that session's history.
+
 ## How it works
 
 ```
@@ -80,6 +104,9 @@ you hit Enter ───────┘                                          
 | `ANTHROPIC_API_KEY` | – | Required for real replies |
 | `SCREEN_BUDDY_MODEL` | `claude-opus-5` | Any vision-capable Claude model |
 | `SCREEN_BUDDY_DIR` | `~/ScreenBuddy` | Where screenshots + `log.jsonl` go |
+| `SCREEN_BUDDY_BACKEND` | `api` | `claude-code` to talk to a Claude Code session |
+| `SCREEN_BUDDY_SESSION` | – | Session ID for the `claude-code` backend |
+| `SCREEN_BUDDY_PROJECT_DIR` | cwd | Folder that session lives in |
 
 The check-in interval and pause state are saved between runs.
 

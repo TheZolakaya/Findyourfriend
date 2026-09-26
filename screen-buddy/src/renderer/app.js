@@ -48,7 +48,7 @@ function renderSettings() {
   $("pause").title = settings.paused ? "Resume auto check-ins" : "Pause auto check-ins";
   renderDot();
   $("footer").textContent =
-    `${settings.live ? "Live" : "Sample mode (no API key)"} · ${settings.hotkey} to show/hide · saves to ${settings.shotsDir}`;
+    `${settings.backendLabel} · ${settings.hotkey} to show/hide · saves to ${settings.shotsDir}`;
 }
 
 function renderDot() {
