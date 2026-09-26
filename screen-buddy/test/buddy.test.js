@@ -121,7 +121,7 @@ test("ClaudeCodeBuddy: quiet, errors, and session follow", async () => {
 
   const bad = new ClaudeCodeBuddy({ sessionId: "s", run: async () => JSON.stringify({ is_error: true, result: "No conversation found" }) });
   await assert.rejects(bad.look({ kind: "user", message: "hi", file: "x.png" }), /No conversation found/);
-  assert.throws(() => new ClaudeCodeBuddy({}), /SCREEN_BUDDY_SESSION/);
+  assert.strictEqual(new ClaudeCodeBuddy({}).sessionId, null);
 });
 
 const { findSessionCwd } = require("../src/buddy");
@@ -143,4 +143,22 @@ test("findSessionCwd locates the folder a session was started in", () => {
 
   const b = new ClaudeCodeBuddy({ sessionId: "abc-123", cwd: "/wrong/place", claudeDir: home, run: async () => "{}" });
   assert.strictEqual(b.cwd, "C:\\Users\\chris\\Findyourfriend");
+});
+
+test("ClaudeCodeBuddy 'latest' uses --continue, then pins the session", async () => {
+  const seen = [];
+  const b = new ClaudeCodeBuddy({
+    sessionId: "latest",
+    cwd: "/proj",
+    run: async (bin, args, cwd) => {
+      seen.push({ args, cwd });
+      return JSON.stringify({ result: "hi", session_id: "pinned-1" });
+    },
+  });
+  await b.look({ kind: "user", message: "a", file: "x.png" });
+  await b.look({ kind: "user", message: "b", file: "x.png" });
+  assert.ok(seen[0].args.includes("--continue"));
+  assert.ok(!seen[0].args.includes("--resume"));
+  assert.strictEqual(seen[0].cwd, "/proj");
+  assert.strictEqual(seen[1].args[seen[1].args.indexOf("--resume") + 1], "pinned-1");
 });

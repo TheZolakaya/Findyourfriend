@@ -42,7 +42,7 @@ const buddy = useClaudeCode
       model: process.env.SCREEN_BUDDY_MODEL,
     });
 const backendLabel = useClaudeCode
-  ? `Claude Code session ${process.env.SCREEN_BUDDY_SESSION.slice(0, 8)}…`
+  ? `Claude Code session ${buddy.sessionId ? buddy.sessionId.slice(0, 8) + "…" : "(latest)"}`
   : buddy.live
     ? "Live"
     : "Sample mode (no API key)";

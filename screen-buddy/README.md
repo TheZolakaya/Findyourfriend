@@ -45,11 +45,11 @@ started on claude.ai/code and pulled onto your computer with `claude --teleport`
    Mac/Linux: `curl -fsSL https://claude.ai/install.sh | bash`
 2. Open the session in your project folder: `claude --teleport <web session id>`
    for a web session, or `claude --resume` to pick a local one.
-3. Inside it, run `/status` and copy the **Session ID**. Then exit.
+3. **Send it one message** (e.g. "hi") so the session is saved, then exit.
 4. In `screen-buddy/.env`:
    ```
    SCREEN_BUDDY_BACKEND=claude-code
-   SCREEN_BUDDY_SESSION=<that session id>
+   SCREEN_BUDDY_SESSION=latest   # or a specific ID from /status
    SCREEN_BUDDY_PROJECT_DIR=/path/to/your/project
    ```
 5. `npm start`. The footer should read "Claude Code session …".
@@ -107,7 +107,7 @@ you hit Enter ───────┘                                          
 | `SCREEN_BUDDY_MODEL` | `claude-opus-5` | Any vision-capable Claude model |
 | `SCREEN_BUDDY_DIR` | `~/ScreenBuddy` | Where screenshots + `log.jsonl` go |
 | `SCREEN_BUDDY_BACKEND` | `api` | `claude-code` to talk to a Claude Code session |
-| `SCREEN_BUDDY_SESSION` | – | Session ID for the `claude-code` backend |
+| `SCREEN_BUDDY_SESSION` | `latest` | Session ID for the `claude-code` backend, or `latest` |
 | `SCREEN_BUDDY_PROJECT_DIR` | cwd | Folder that session lives in |
 
 The check-in interval and pause state are saved between runs.

@@ -113,11 +113,12 @@ module.exports = { Buddy, isQuiet, trimHistory, buildUserContent, QUIET_TOKEN, S
 // itself with its Read tool.
 class ClaudeCodeBuddy {
   constructor({ sessionId, cwd, shotsDir, bin = "claude", run, claudeDir } = {}) {
-    if (!sessionId) throw new Error("SCREEN_BUDDY_SESSION is required for the claude-code backend");
-    this.sessionId = sessionId;
+    // "latest" (or blank) = the most recent session in `cwd`; we then stick to
+    // whatever session that turns out to be.
+    this.sessionId = !sessionId || sessionId === "latest" ? null : sessionId;
     // Claude Code only finds a session when run from the folder it was
     // started in, so look that up rather than trusting the config.
-    this.cwd = findSessionCwd(sessionId, claudeDir) || cwd || process.cwd();
+    this.cwd = (this.sessionId && findSessionCwd(this.sessionId, claudeDir)) || cwd || process.cwd();
     this.shotsDir = shotsDir;
     this.bin = bin;
     this.run = run || defaultRun;
@@ -127,7 +128,7 @@ class ClaudeCodeBuddy {
   args(prompt) {
     const a = [
       "-p", prompt,
-      "--resume", this.sessionId,
+      ...(this.sessionId ? ["--resume", this.sessionId] : ["--continue"]),
       "--output-format", "json",
       "--allowedTools", "Read",
       "--append-system-prompt", SYSTEM_PROMPT,
@@ -194,9 +195,12 @@ function findSessionCwd(sessionId, claudeDir = claudeHome()) {
 }
 
 function notFoundMessage(sessionId, cwd) {
+  if (!sessionId) {
+    return `No Claude Code session found in ${cwd}. Open Claude Code in that folder, send it a message so the session is saved, then restart Screen Buddy.`;
+  }
   return (
     `Claude Code can't find session ${sessionId} (looked in ${cwd}). ` +
-    `Open Claude Code, run /status, and copy the Session ID again into SCREEN_BUDDY_SESSION in screen-buddy/.env, then restart.`
+    `Set SCREEN_BUDDY_SESSION=latest in screen-buddy/.env to use your most recent session there, then restart.`
   );
 }
 
@@ -205,7 +209,8 @@ function defaultRun(bin, args, cwd) {
   return new Promise((resolve, reject) => {
     const child = execFile(bin, args, { cwd, timeout: 5 * 60 * 1000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (/No conversation found/i.test(stderr || "") || /No conversation found/i.test(stdout || "")) {
-        return reject(new Error(notFoundMessage(args[args.indexOf("--resume") + 1], cwd)));
+        const i = args.indexOf("--resume");
+        return reject(new Error(notFoundMessage(i >= 0 ? args[i + 1] : null, cwd)));
       }
       if (err && !stdout) {
         const hint =
