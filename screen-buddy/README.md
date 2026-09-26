@@ -13,6 +13,9 @@ now and then, and chats with you about it.
   its own. The buddy only speaks up when something is worth it, like an error
   on screen or a likely mistake. Then you get a desktop notification and the
   window flashes. The rest of the time it stays quiet.
+- **Adjustable panel.** A−/A+ (or Ctrl −/+, Ctrl 0 to reset) changes only
+  the chat text size. The window − ▢ + buttons (or Ctrl+Shift −/+) resize the
+  window. The ◐ slider makes the panel see-through. All of these are remembered.
 - **Everything goes to a file.** Each screenshot is saved as a PNG in
   `~/ScreenBuddy/`. `log.jsonl` there records every message, reply, and
   screenshot path.

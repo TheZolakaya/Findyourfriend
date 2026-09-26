@@ -42,7 +42,17 @@ function addStatus(text, cls = "status") {
   log.scrollTop = log.scrollHeight;
 }
 
+function applyTextScale(scale) {
+  if (scale) document.documentElement.style.setProperty("--text-scale", scale);
+}
+
+async function textSize(step) {
+  applyTextScale(await window.buddy.textSize(step));
+}
+
 function renderSettings() {
+  applyTextScale(settings.textScale);
+  $("opacity").value = String(Math.round((settings.opacity ?? 1) * 100));
   $("interval").value = String(settings.intervalMin);
   $("pause").textContent = settings.paused ? "▶" : "⏸";
   $("pause").title = settings.paused ? "Resume auto check-ins" : "Pause auto check-ins";
@@ -88,14 +98,20 @@ $("pause").addEventListener("click", async () => {
 $("checkNow").addEventListener("click", () => window.buddy.checkNow());
 $("folder").addEventListener("click", () => window.buddy.openFolder());
 $("hide").addEventListener("click", () => window.buddy.hide());
-$("smaller").addEventListener("click", () => window.buddy.zoom(-1));
-$("bigger").addEventListener("click", () => window.buddy.zoom(1));
+$("smaller").addEventListener("click", () => textSize(-1));
+$("bigger").addEventListener("click", () => textSize(1));
+$("opacity").addEventListener("input", (e) => window.buddy.setOpacity(Number(e.target.value) / 100));
+$("winSmaller").addEventListener("click", () => window.buddy.resize(-1));
+$("winBigger").addEventListener("click", () => window.buddy.resize(1));
+// Ctrl +/-/0 = text size; Ctrl+Shift +/- = window size.
 document.addEventListener("keydown", (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
-  const step = { "=": 1, "+": 1, "-": -1, _: -1, 0: 0 }[e.key];
+  // e.code is the physical key, so Shift doesn't turn "=" into "+".
+  const step = { Equal: 1, NumpadAdd: 1, Minus: -1, NumpadSubtract: -1, Digit0: 0, Numpad0: 0 }[e.code];
   if (step === undefined) return;
   e.preventDefault();
-  window.buddy.zoom(step);
+  if (e.shiftKey) window.buddy.resize(step);
+  else textSize(step);
 });
 $("collapse").addEventListener("click", () => {
   collapsed = !collapsed;
