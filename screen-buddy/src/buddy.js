@@ -112,10 +112,12 @@ module.exports = { Buddy, isQuiet, trimHistory, buildUserContent, QUIET_TOKEN, S
 // memory of your project and conversation. Claude Code opens the screenshot
 // itself with its Read tool.
 class ClaudeCodeBuddy {
-  constructor({ sessionId, cwd, shotsDir, bin = "claude", run } = {}) {
+  constructor({ sessionId, cwd, shotsDir, bin = "claude", run, claudeDir } = {}) {
     if (!sessionId) throw new Error("SCREEN_BUDDY_SESSION is required for the claude-code backend");
     this.sessionId = sessionId;
-    this.cwd = cwd || process.cwd();
+    // Claude Code only finds a session when run from the folder it was
+    // started in, so look that up rather than trusting the config.
+    this.cwd = findSessionCwd(sessionId, claudeDir) || cwd || process.cwd();
     this.shotsDir = shotsDir;
     this.bin = bin;
     this.run = run || defaultRun;
@@ -148,16 +150,63 @@ class ClaudeCodeBuddy {
       throw new Error(`Unexpected output from claude: ${out.slice(0, 200)}`);
     }
     if (parsed.is_error) throw new Error(parsed.result || "Claude Code returned an error");
+    if (/No conversation found/i.test(out)) throw new Error(notFoundMessage(this.sessionId, this.cwd));
     if (parsed.session_id) this.sessionId = parsed.session_id; // follow the session if it moves
     const text = String(parsed.result || "").trim() || QUIET_TOKEN;
     return { text, quiet: isQuiet(text) };
   }
 }
 
+function claudeHome() {
+  const os = require("os");
+  const path = require("path");
+  return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
+}
+
+// Sessions live at <claude home>/projects/<encoded folder>/<id>.jsonl, and
+// each line records the folder ("cwd") the session runs in.
+function findSessionCwd(sessionId, claudeDir = claudeHome()) {
+  const fs = require("fs");
+  const path = require("path");
+  const projects = path.join(claudeDir, "projects");
+  let dirs;
+  try {
+    dirs = fs.readdirSync(projects);
+  } catch {
+    return null;
+  }
+  for (const dir of dirs) {
+    const file = path.join(projects, dir, `${sessionId}.jsonl`);
+    let text;
+    try {
+      text = fs.readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of text.split("\n")) {
+      try {
+        const cwd = JSON.parse(line).cwd;
+        if (cwd) return cwd;
+      } catch {}
+    }
+  }
+  return null;
+}
+
+function notFoundMessage(sessionId, cwd) {
+  return (
+    `Claude Code can't find session ${sessionId} (looked in ${cwd}). ` +
+    `Open Claude Code, run /status, and copy the Session ID again into SCREEN_BUDDY_SESSION in screen-buddy/.env, then restart.`
+  );
+}
+
 function defaultRun(bin, args, cwd) {
   const { execFile } = require("child_process");
   return new Promise((resolve, reject) => {
-    execFile(bin, args, { cwd, timeout: 5 * 60 * 1000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const child = execFile(bin, args, { cwd, timeout: 5 * 60 * 1000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (/No conversation found/i.test(stderr || "") || /No conversation found/i.test(stdout || "")) {
+        return reject(new Error(notFoundMessage(args[args.indexOf("--resume") + 1], cwd)));
+      }
       if (err && !stdout) {
         const hint =
           err.code === "ENOENT" || err.code === "EINVAL"
@@ -169,7 +218,9 @@ function defaultRun(bin, args, cwd) {
       }
       resolve(stdout);
     });
+    child.stdin?.end(); // no input coming; otherwise claude waits for stdin
   });
 }
 
 module.exports.ClaudeCodeBuddy = ClaudeCodeBuddy;
+module.exports.findSessionCwd = findSessionCwd;

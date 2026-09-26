@@ -123,3 +123,24 @@ test("ClaudeCodeBuddy: quiet, errors, and session follow", async () => {
   await assert.rejects(bad.look({ kind: "user", message: "hi", file: "x.png" }), /No conversation found/);
   assert.throws(() => new ClaudeCodeBuddy({}), /SCREEN_BUDDY_SESSION/);
 });
+
+const { findSessionCwd } = require("../src/buddy");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+
+test("findSessionCwd locates the folder a session was started in", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "claude-home-"));
+  const dir = path.join(home, "projects", "C--Users-chris-Findyourfriend");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "abc-123.jsonl"),
+    ['{"type":"summary"}', JSON.stringify({ type: "user", cwd: "C:\\Users\\chris\\Findyourfriend" })].join("\n"),
+  );
+  assert.strictEqual(findSessionCwd("abc-123", home), "C:\\Users\\chris\\Findyourfriend");
+  assert.strictEqual(findSessionCwd("missing", home), null);
+  assert.strictEqual(findSessionCwd("abc-123", path.join(home, "nope")), null);
+
+  const b = new ClaudeCodeBuddy({ sessionId: "abc-123", cwd: "/wrong/place", claudeDir: home, run: async () => "{}" });
+  assert.strictEqual(b.cwd, "C:\\Users\\chris\\Findyourfriend");
+});
