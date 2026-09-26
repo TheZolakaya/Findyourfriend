@@ -55,6 +55,9 @@ class Buddy {
     return Boolean(this.client);
   }
 
+  warm() {} // nothing to start; matches ClaudeCodeBuddy
+  async close() {}
+
   // kind: "user" | "auto". Returns { text, quiet }.
   async look({ kind, message, jpegBase64, file, when = new Date().toLocaleTimeString() }) {
     if (!this.client) {
@@ -107,12 +110,28 @@ class Buddy {
 
 module.exports = { Buddy, isQuiet, trimHistory, buildUserContent, QUIET_TOKEN, SYSTEM_PROMPT };
 
-// Sends each check-in into an existing Claude Code session (e.g. one you
-// teleported from claude.ai/code), so the buddy is *that* Claude, with its
-// memory of your project and conversation. Claude Code opens the screenshot
-// itself with its Read tool.
+// Talks to an existing Claude Code session (e.g. one you teleported from
+// claude.ai/code), so the buddy is *that* Claude, with its memory of your
+// project and conversation.
+//
+// One `claude` process is kept running for the whole app (stream-json in and
+// out) instead of starting a new one per message: no startup cost, the
+// screenshot goes in as an image block (no Read-tool round trip), and reply
+// text streams back as it's written. Closing stdin makes claude finish and
+// exit on its own, which frees the session for other clients (VS Code etc).
 class ClaudeCodeBuddy {
-  constructor({ sessionId, cwd, shotsDir, bin = "claude", run, claudeDir } = {}) {
+  constructor({
+    sessionId,
+    cwd,
+    shotsDir,
+    bin = "claude",
+    binArgs = [],
+    model,
+    claudeDir,
+    idleMs = 10 * 60 * 1000,
+    turnTimeoutMs = 5 * 60 * 1000,
+    spawnFn,
+  } = {}) {
     // "latest" (or blank) = the most recent session in `cwd`; we then stick to
     // whatever session that turns out to be.
     this.sessionId = !sessionId || sessionId === "latest" ? null : sessionId;
@@ -121,41 +140,206 @@ class ClaudeCodeBuddy {
     this.cwd = (this.sessionId && findSessionCwd(this.sessionId, claudeDir)) || cwd || process.cwd();
     this.shotsDir = shotsDir;
     this.bin = bin;
-    this.run = run || defaultRun;
+    this.binArgs = binArgs;
+    this.model = model;
+    this.idleMs = idleMs;
+    this.turnTimeoutMs = turnTimeoutMs;
+    this.spawnFn = spawnFn || require("child_process").spawn;
     this.live = true;
+    this.proc = null;
+    this.pending = null;
+    this.idleTimer = null;
   }
 
-  args(prompt) {
+  args() {
     const a = [
-      "-p", prompt,
+      ...this.binArgs,
+      "-p",
+      "--input-format", "stream-json",
+      "--output-format", "stream-json",
+      "--include-partial-messages",
+      "--verbose",
       ...(this.sessionId ? ["--resume", this.sessionId] : ["--continue"]),
-      "--output-format", "json",
       "--allowedTools", "Read",
       "--append-system-prompt", SYSTEM_PROMPT,
     ];
     if (this.shotsDir) a.push("--add-dir", this.shotsDir);
+    if (this.model) a.push("--model", this.model);
     return a;
   }
 
-  async look({ kind, message, file, when = new Date().toLocaleTimeString() }) {
+  get running() {
+    return Boolean(this.proc);
+  }
+
+  _start() {
+    const proc = this.spawnFn(this.bin, this.args(), {
+      cwd: this.cwd,
+      env: childEnv(process.env),
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    this.proc = proc;
+    proc.stderrTail = "";
+    let buf = "";
+    proc.stdout.setEncoding("utf8");
+    proc.stdout.on("data", (chunk) => {
+      buf += chunk;
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (line) this._onLine(line);
+      }
+    });
+    proc.stderr.setEncoding("utf8");
+    proc.stderr.on("data", (chunk) => {
+      proc.stderrTail = (proc.stderrTail + chunk).slice(-2000);
+    });
+    proc.on("error", (err) => this._onExit(proc, err));
+    proc.on("exit", (code, signal) => this._onExit(proc, null, code, signal));
+    proc.stdin.on("error", () => {}); // EPIPE if claude died; handled via exit
+  }
+
+  _onLine(line) {
+    let m;
+    try {
+      m = JSON.parse(line);
+    } catch {
+      return; // not a protocol line
+    }
+    if (m.type === "system" && m.subtype === "init" && m.session_id) {
+      this.sessionId = m.session_id; // pin, so a restart resumes the same session
+    }
+    const p = this.pending;
+    if (!p) return;
+    if (m.type === "stream_event") {
+      const e = m.event;
+      if (e?.type === "content_block_delta" && e.delta?.type === "text_delta") {
+        p.text += e.delta.text;
+        p.onText?.(p.text);
+      }
+    } else if (m.type === "result") {
+      if (m.session_id) this.sessionId = m.session_id;
+      if (m.is_error) {
+        const msg = String(m.result || m.subtype || "Claude Code returned an error");
+        this._settle(new Error(/No conversation found/i.test(msg) ? notFoundMessage(this.sessionId, this.cwd) : msg));
+      } else {
+        const text = String(m.result ?? p.text).trim() || QUIET_TOKEN;
+        this._settle(null, { text, quiet: isQuiet(text) });
+      }
+    }
+  }
+
+  _onExit(proc, err, code, signal) {
+    if (this.proc === proc) this.proc = null;
+    proc.exited = true;
+    proc.emit?.("buddy-exit");
+    if (!this.pending) return;
+    const tail = proc.stderrTail || "";
+    let msg;
+    if (/No conversation found/i.test(tail)) msg = notFoundMessage(this.sessionId, this.cwd);
+    else if (err && (err.code === "ENOENT" || err.code === "EINVAL")) {
+      msg =
+        process.platform === "win32"
+          ? "claude failed (install Claude Code with the native installer so claude.exe exists, or set SCREEN_BUDDY_CLAUDE_BIN to its full path)"
+          : "claude failed (is Claude Code installed and on your PATH?)";
+    } else {
+      msg = `claude stopped unexpectedly (${err ? err.message : `exit ${code ?? signal}`})${tail ? ": " + tail.trim().slice(-300) : ""}`;
+    }
+    this._settle(new Error(msg));
+  }
+
+  _settle(err, value) {
+    const p = this.pending;
+    if (!p) return;
+    this.pending = null;
+    clearTimeout(p.timer);
+    this._armIdle();
+    if (err) p.reject(err);
+    else p.resolve(value);
+  }
+
+  // Free the session when nobody has talked to it for a while; the next
+  // message just starts claude again.
+  _armIdle() {
+    clearTimeout(this.idleTimer);
+    if (this.idleMs > 0) this.idleTimer = setTimeout(() => this.close(), this.idleMs);
+  }
+
+  // Start claude ahead of the first message so its startup doesn't count
+  // against the reply. The idle timer still frees the session if unused.
+  warm() {
+    if (!this.proc && !this.pending) {
+      this._start();
+      this._armIdle();
+    }
+  }
+
+  // onText(textSoFar) is called as the reply streams in.
+  look({ kind, message, jpegBase64, file, when = new Date().toLocaleTimeString(), onText }) {
+    if (this.pending) return Promise.reject(new Error("Still answering the last message"));
+    clearTimeout(this.idleTimer);
+    if (!this.proc) this._start();
     const head =
       kind === "auto"
         ? `[Screen Buddy] AUTO CHECK-IN at ${when}. Nobody asked you anything. Reply ${QUIET_TOKEN} unless something is worth saying.`
         : `[Screen Buddy] USER MESSAGE at ${when}: ${message}`;
-    const prompt = `${head}\n\nScreenshot of my screen right now: ${file}\nOpen it with the Read tool before answering.`;
-    const out = await this.run(this.bin, this.args(prompt), this.cwd);
-    let parsed;
-    try {
-      parsed = JSON.parse(out);
-    } catch {
-      throw new Error(`Unexpected output from claude: ${out.slice(0, 200)}`);
+    const content = [];
+    if (jpegBase64) {
+      content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } });
     }
-    if (parsed.is_error) throw new Error(parsed.result || "Claude Code returned an error");
-    if (/No conversation found/i.test(out)) throw new Error(notFoundMessage(this.sessionId, this.cwd));
-    if (parsed.session_id) this.sessionId = parsed.session_id; // follow the session if it moves
-    const text = String(parsed.result || "").trim() || QUIET_TOKEN;
-    return { text, quiet: isQuiet(text) };
+    content.push({ type: "text", text: `${head}\n\n(The attached image is my screen right now, also saved at ${file}.)` });
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this._settle(new Error("Claude took too long to answer; restarting it."));
+        this._kill();
+      }, this.turnTimeoutMs);
+      this.pending = { resolve, reject, text: "", onText, timer };
+      this.proc.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content } }) + "\n");
+    });
   }
+
+  _kill() {
+    const proc = this.proc;
+    this.proc = null;
+    if (proc && !proc.exited) proc.kill();
+  }
+
+  // Ask claude to finish and exit (closing stdin lets it save and release the
+  // session). If it hasn't exited after timeoutMs, force it.
+  close(timeoutMs = 5000) {
+    clearTimeout(this.idleTimer);
+    const proc = this.proc;
+    if (!proc || proc.exited) {
+      this.proc = null;
+      return Promise.resolve();
+    }
+    this.proc = null; // new messages start a fresh process
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(force);
+        resolve();
+      };
+      const force = setTimeout(() => {
+        if (!proc.exited) proc.kill();
+        resolve();
+      }, timeoutMs);
+      proc.once("buddy-exit", done);
+      proc.stdin.end();
+    });
+  }
+}
+
+// If Screen Buddy was started from inside a Claude Code session (e.g. its
+// terminal in VS Code), these would make our claude attach to *that* session
+// instead of the one we asked for.
+const PARENT_SESSION_VARS = ["CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_PID"];
+function childEnv(env) {
+  const out = { ...env };
+  for (const k of PARENT_SESSION_VARS) delete out[k];
+  return out;
 }
 
 function claudeHome() {
@@ -204,28 +388,6 @@ function notFoundMessage(sessionId, cwd) {
   );
 }
 
-function defaultRun(bin, args, cwd) {
-  const { execFile } = require("child_process");
-  return new Promise((resolve, reject) => {
-    const child = execFile(bin, args, { cwd, timeout: 5 * 60 * 1000, maxBuffer: 10 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
-      if (/No conversation found/i.test(stderr || "") || /No conversation found/i.test(stdout || "")) {
-        const i = args.indexOf("--resume");
-        return reject(new Error(notFoundMessage(i >= 0 ? args[i + 1] : null, cwd)));
-      }
-      if (err && !stdout) {
-        const hint =
-          err.code === "ENOENT" || err.code === "EINVAL"
-            ? process.platform === "win32"
-              ? " (install Claude Code with the native installer so claude.exe exists, or set SCREEN_BUDDY_CLAUDE_BIN to its full path)"
-              : " (is Claude Code installed and on your PATH?)"
-            : "";
-        return reject(new Error(`claude failed${hint}: ${stderr || err.message}`));
-      }
-      resolve(stdout);
-    });
-    child.stdin?.end(); // no input coming; otherwise claude waits for stdin
-  });
-}
-
 module.exports.ClaudeCodeBuddy = ClaudeCodeBuddy;
 module.exports.findSessionCwd = findSessionCwd;
+module.exports.childEnv = childEnv;

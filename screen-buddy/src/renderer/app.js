@@ -119,14 +119,36 @@ $("collapse").addEventListener("click", () => {
   window.buddy.collapse(collapsed);
 });
 
+// The reply bubble that fills in while Claude is still writing.
+let liveEl = null;
+function clearLive() {
+  liveEl?.remove();
+  liveEl = null;
+}
+window.buddy.onDelta(({ text }) => {
+  if (!liveEl) {
+    liveEl = document.createElement("div");
+    liveEl.className = "msg them live";
+    log.append(liveEl);
+  }
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  liveEl.textContent = text;
+  if (atBottom) log.scrollTop = log.scrollHeight;
+});
+
 window.buddy.onReply((r) => {
+  clearLive();
   addMessage({ who: "them", ...r });
   if (r.kind === "auto" && (collapsed || !document.hasFocus())) $("badge").hidden = false;
 });
 window.buddy.onStatus((s) => addStatus(s.text));
-window.buddy.onError((e) => addStatus(e.text, "err"));
+window.buddy.onError((e) => {
+  clearLive();
+  addStatus(e.text, "err");
+});
 window.buddy.onThinking((t) => {
   thinking = t;
+  if (!t) clearLive();
   $("sendBtn").disabled = t;
   renderDot();
 });

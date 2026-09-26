@@ -44,6 +44,8 @@ const buddy = useClaudeCode
       cwd: process.env.SCREEN_BUDDY_PROJECT_DIR,
       shotsDir: SHOTS_DIR,
       bin: process.env.SCREEN_BUDDY_CLAUDE_BIN,
+      model: process.env.SCREEN_BUDDY_CLAUDE_MODEL,
+      idleMs: minutesEnv("SCREEN_BUDDY_IDLE_MIN", 10) * 60 * 1000,
     })
   : new Buddy({
       apiKey: process.env.ANTHROPIC_API_KEY,
@@ -54,6 +56,11 @@ const backendLabel = useClaudeCode
   : buddy.live
     ? "Live"
     : "Sample mode (no API key)";
+
+function minutesEnv(name, fallback) {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n >= 0 && process.env[name] !== "" ? n : fallback;
+}
 
 function loadSettings() {
   try {
@@ -206,6 +213,9 @@ async function checkIn(kind, message = "") {
       jpegBase64,
       file,
       when: when.toLocaleTimeString(),
+      // Stream your answers into the panel as they're written. Check-ins
+      // don't stream: most of them end up quiet.
+      onText: kind === "user" ? (t) => send("buddy:delta", { text: t }) : undefined,
     });
     appendLog({ at: when.toISOString(), kind, file, message: message || null, reply: text, quiet });
 
@@ -296,6 +306,7 @@ if (process.platform === "win32") app.setAppUserModelId("com.screenbuddy.app");
 app.whenReady().then(() => {
   createWindow();
   schedule();
+  buddy.warm();
   globalShortcut.register(HOTKEY, () => {
     if (win?.isVisible() && win.isFocused()) win.hide();
     else showWindow();
@@ -304,3 +315,22 @@ app.whenReady().then(() => {
 
 app.on("will-quit", () => globalShortcut.unregisterAll());
 app.on("window-all-closed", () => app.quit());
+
+// Shut claude down properly before exiting, so the session is released
+// (e.g. for VS Code) instead of being left to a killed process.
+let shutdownDone = false;
+app.on("before-quit", (e) => {
+  if (shutdownDone) return;
+  e.preventDefault();
+  clearInterval(timer);
+  send("buddy:status", { text: "Closing Claude…" });
+  buddy
+    .close()
+    .catch(() => {})
+    .finally(() => {
+      shutdownDone = true;
+      app.quit();
+    });
+});
+// Ctrl+C in the terminal that ran `npm start`.
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => app.quit());
