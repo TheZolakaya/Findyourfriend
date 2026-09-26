@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("buddy", {
   openFile: (file) => ipcRenderer.invoke("buddy:open-file", file),
   collapse: (collapsed) => ipcRenderer.send("buddy:collapse", collapsed),
   hide: () => ipcRenderer.send("buddy:hide"),
+  zoom: (step) => ipcRenderer.invoke("buddy:zoom", step),
   quit: () => ipcRenderer.send("buddy:quit"),
   onReply: on("buddy:reply"),
   onStatus: on("buddy:status"),

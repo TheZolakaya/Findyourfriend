@@ -22,7 +22,14 @@ const HOTKEY = "CommandOrControl+Shift+Space";
 const CHANGE_THRESHOLD = 2; // mean gray-level diff below this = "screen didn't change"
 const MAX_SEND_WIDTH = 1568; // long edge we send to the model
 
-const DEFAULTS = { intervalMin: 5, paused: false };
+const DEFAULTS = { intervalMin: 5, paused: false, zoom: 1.25 };
+const BASE_W = 360;
+const BASE_H = 520;
+const BAR_H = 44;
+const ZOOM_MIN = 0.8;
+const ZOOM_MAX = 2.5;
+let collapsed = false;
+let expandedHeight = 0;
 
 let win;
 let timer;
@@ -62,15 +69,16 @@ function saveSettings() {
 
 function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
-  const width = 360;
-  const height = 520;
+  const zoom = settings.zoom;
+  const width = Math.min(Math.round(BASE_W * zoom), workArea.width - 32);
+  const height = Math.min(Math.round(BASE_H * zoom), workArea.height - 32);
   win = new BrowserWindow({
     width,
     height,
     x: workArea.x + workArea.width - width - 16,
     y: workArea.y + workArea.height - height - 16,
     minWidth: 260,
-    minHeight: 44,
+    minHeight: BAR_H,
     frame: false,
     transparent: true,
     resizable: true,
@@ -87,7 +95,31 @@ function createWindow() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   // Keep our own window out of the screenshots (macOS / Windows).
   win.setContentProtection(true);
+  win.webContents.on("did-finish-load", () => win.webContents.setZoomFactor(settings.zoom));
   win.loadFile(path.join(__dirname, "renderer", "index.html"));
+}
+
+// Grow/shrink the whole panel (text and window) together. step: +1, -1, or 0 to reset.
+function setZoom(step) {
+  const old = settings.zoom;
+  const next = step === 0 ? DEFAULTS.zoom : old + step * 0.1;
+  settings.zoom = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next)) * 100) / 100;
+  if (settings.zoom === old) return settings.zoom;
+  saveSettings();
+  win.webContents.setZoomFactor(settings.zoom);
+
+  const { workArea } = screen.getDisplayMatching(win.getBounds());
+  const [x, y] = win.getPosition();
+  const [w, h] = win.getSize();
+  const ratio = settings.zoom / old;
+  const newW = Math.min(Math.round(w * ratio), workArea.width);
+  const newH = collapsed ? Math.round(BAR_H * settings.zoom) : Math.min(Math.round(h * ratio), workArea.height);
+  if (collapsed) expandedHeight = Math.round(expandedHeight * ratio);
+  // Keep the bottom-right corner where it is, but stay on screen.
+  const newX = Math.max(workArea.x, x + w - newW);
+  const newY = Math.max(workArea.y, y + h - newH);
+  win.setBounds({ x: newX, y: newY, width: newW, height: newH }, true);
+  return settings.zoom;
 }
 
 function send(channel, payload) {
@@ -233,10 +265,13 @@ ipcMain.handle("buddy:open-file", (_e, file) => {
   // Only open files we wrote.
   if (path.resolve(file).startsWith(path.resolve(SHOTS_DIR) + path.sep)) return shell.openPath(file);
 });
-ipcMain.on("buddy:collapse", (_e, collapsed) => {
+ipcMain.handle("buddy:zoom", (_e, step) => setZoom(step));
+ipcMain.on("buddy:collapse", (_e, isCollapsed) => {
   if (!win) return;
-  const [w] = win.getSize();
-  win.setSize(w, collapsed ? 44 : 520, true);
+  const [w, h] = win.getSize();
+  collapsed = isCollapsed;
+  if (collapsed) expandedHeight = h;
+  win.setSize(w, collapsed ? Math.round(BAR_H * settings.zoom) : expandedHeight || Math.round(BASE_H * settings.zoom), true);
 });
 ipcMain.on("buddy:hide", () => win?.hide());
 ipcMain.on("buddy:quit", () => app.quit());

@@ -88,6 +88,15 @@ $("pause").addEventListener("click", async () => {
 $("checkNow").addEventListener("click", () => window.buddy.checkNow());
 $("folder").addEventListener("click", () => window.buddy.openFolder());
 $("hide").addEventListener("click", () => window.buddy.hide());
+$("smaller").addEventListener("click", () => window.buddy.zoom(-1));
+$("bigger").addEventListener("click", () => window.buddy.zoom(1));
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const step = { "=": 1, "+": 1, "-": -1, _: -1, 0: 0 }[e.key];
+  if (step === undefined) return;
+  e.preventDefault();
+  window.buddy.zoom(step);
+});
 $("collapse").addEventListener("click", () => {
   collapsed = !collapsed;
   document.body.classList.toggle("collapsed", collapsed);
