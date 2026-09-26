@@ -231,3 +231,13 @@ test("warm() starts claude before the first message, and it gets reused", async 
   await b.close();
   assert.strictEqual(events().filter((e) => e.event === "start").length, 1);
 });
+
+test("captureSize caps width at the chosen detail level, keeps aspect, never upscales", () => {
+  const { captureSize, normalizeShotWidth } = require("../src/frames");
+  assert.deepStrictEqual(captureSize(3840, 2160, 1280), { width: 1280, height: 720 });
+  assert.deepStrictEqual(captureSize(3840, 2160, 1920), { width: 1920, height: 1080 });
+  assert.deepStrictEqual(captureSize(3440, 1440, 1024), { width: 1024, height: 429 });
+  assert.deepStrictEqual(captureSize(1366, 768, 1568), { width: 1366, height: 768 }); // small screen: as-is
+  assert.strictEqual(normalizeShotWidth("1568"), 1568);
+  assert.strictEqual(normalizeShotWidth(9999), 1280); // unknown -> default
+});

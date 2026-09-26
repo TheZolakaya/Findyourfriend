@@ -54,6 +54,7 @@ function renderSettings() {
   applyTextScale(settings.textScale);
   $("opacity").value = String(Math.round((settings.opacity ?? 1) * 100));
   $("interval").value = String(settings.intervalMin);
+  $("shotWidth").value = String(settings.shotWidth);
   $("pause").textContent = settings.paused ? "▶" : "⏸";
   $("pause").title = settings.paused ? "Resume auto check-ins" : "Pause auto check-ins";
   renderDot();
@@ -88,6 +89,10 @@ input.addEventListener("focus", () => ($("badge").hidden = true));
 
 $("interval").addEventListener("change", async (e) => {
   settings = { ...settings, ...(await window.buddy.setSettings({ intervalMin: Number(e.target.value) })) };
+  renderSettings();
+});
+$("shotWidth").addEventListener("change", async (e) => {
+  settings = { ...settings, ...(await window.buddy.setSettings({ shotWidth: Number(e.target.value) })) };
   renderSettings();
 });
 $("pause").addEventListener("click", async () => {

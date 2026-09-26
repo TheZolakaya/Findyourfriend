@@ -13,16 +13,15 @@ const {
 require("dotenv").config({ path: path.join(__dirname, "..", ".env"), quiet: true });
 
 const { Buddy, ClaudeCodeBuddy } = require("./buddy");
-const { toGray, frameDiff } = require("./frames");
+const { toGray, frameDiff, captureSize, normalizeShotWidth, DEFAULT_SHOT_WIDTH } = require("./frames");
 
 const SHOTS_DIR = process.env.SCREEN_BUDDY_DIR || path.join(app.getPath("home"), "ScreenBuddy");
 const SETTINGS_FILE = path.join(app.getPath("userData"), "settings.json");
 const LOG_FILE = path.join(SHOTS_DIR, "log.jsonl");
 const HOTKEY = "CommandOrControl+Shift+Space";
 const CHANGE_THRESHOLD = 2; // mean gray-level diff below this = "screen didn't change"
-const MAX_SEND_WIDTH = 1568; // long edge we send to the model
 
-const DEFAULTS = { intervalMin: 5, paused: false, textScale: 1.25, winW: 360, winH: 520, opacity: 1 };
+const DEFAULTS = { intervalMin: 5, paused: false, textScale: 1.25, winW: 360, winH: 520, opacity: 1, shotWidth: DEFAULT_SHOT_WIDTH };
 const OPACITY_MIN = 0.3; // never let the panel vanish completely
 const BAR_H = 44;
 const TEXT_MIN = 0.8;
@@ -160,7 +159,9 @@ async function captureScreen() {
   try {
     sources = await desktopCapturer.getSources({
       types: ["screen"],
-      thumbnailSize: { width: Math.round(width * scale), height: Math.round(height * scale) },
+      // Capture straight at the chosen detail level (e.g. 1280 wide) rather
+      // than full 4K: less to save, and less of the buddy's context per image.
+      thumbnailSize: captureSize(Math.round(width * scale), Math.round(height * scale), settings.shotWidth),
     });
   } finally {
     if (hideForCapture) win.showInactive();
@@ -204,8 +205,7 @@ async function checkIn(kind, message = "") {
     const file = path.join(SHOTS_DIR, `${stamp(when)}_${kind}.png`);
     fs.writeFileSync(file, image.toPNG());
 
-    const small = image.getSize().width > MAX_SEND_WIDTH ? image.resize({ width: MAX_SEND_WIDTH }) : image;
-    const jpegBase64 = small.toJPEG(80).toString("base64");
+    const jpegBase64 = image.toJPEG(80).toString("base64");
 
     const { text, quiet } = await buddy.look({
       kind,
@@ -270,6 +270,7 @@ ipcMain.handle("buddy:get-settings", () => ({
 ipcMain.handle("buddy:set-settings", (_e, patch) => {
   settings = { ...settings, ...patch };
   settings.intervalMin = Math.max(0, Number(settings.intervalMin) || 0);
+  settings.shotWidth = normalizeShotWidth(settings.shotWidth);
   saveSettings();
   schedule();
   return settings;

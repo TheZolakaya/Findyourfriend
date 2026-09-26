@@ -18,4 +18,21 @@ function frameDiff(a, b) {
   return sum / a.length;
 }
 
-module.exports = { toGray, frameDiff };
+// Screenshot widths offered in the panel. Each image costs roughly
+// width*height/750 tokens of context (16:9: 1024 ≈ 800, 1280 ≈ 1.2k,
+// 1568 ≈ 1.8k, 1920 ≈ 2.8k).
+const SHOT_WIDTHS = [1024, 1280, 1568, 1920];
+const DEFAULT_SHOT_WIDTH = 1280;
+
+function normalizeShotWidth(w) {
+  return SHOT_WIDTHS.includes(Number(w)) ? Number(w) : DEFAULT_SHOT_WIDTH;
+}
+
+// Size to capture a physW x physH screen at, so its width is at most `width`
+// (never upscaled), keeping the aspect ratio.
+function captureSize(physW, physH, width) {
+  const w = Math.min(physW, normalizeShotWidth(width));
+  return { width: w, height: Math.round((physH * w) / physW) };
+}
+
+module.exports = { toGray, frameDiff, captureSize, normalizeShotWidth, SHOT_WIDTHS, DEFAULT_SHOT_WIDTH };

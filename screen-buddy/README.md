@@ -16,6 +16,10 @@ now and then, and chats with you about it.
 - **Adjustable panel.** A−/A+ (or Ctrl −/+, Ctrl 0 to reset) changes only
   the chat text size. The window − ▢ + buttons (or Ctrl+Shift −/+) resize the
   window. The ◐ slider makes the panel see-through. All of these are remembered.
+- **Detail level.** Screenshots are captured at the size you pick in the
+  panel, not full 4K: Low (1024 wide, ≈800 tokens each), 720p (1280, ≈1.2k,
+  the default), High (1568, ≈1.8k) or 1080p (1920, ≈2.8k). Smaller uses up
+  less of your buddy's context; larger keeps small text readable.
 - **Everything goes to a file.** Each screenshot is saved as a PNG in
   `~/ScreenBuddy/`. `log.jsonl` there records every message, reply, and
   screenshot path.
@@ -103,7 +107,7 @@ you hit Enter ───────┘                                          
   last one. If the screen hasn't changed, no API call is made.
 - **Only the current screenshot is sent.** Older turns are kept as text memory
   (last 20 exchanges), so the context doesn't fill up with images.
-- Screenshots are downscaled to 1568px wide and sent as JPEG. Auto check-ins
+- Screenshots are captured at the Detail size you choose (720p by default) and sent as JPEG. Auto check-ins
   use `low` effort and your messages use `medium`.
 
 ### Privacy
