@@ -22,12 +22,13 @@ const HOTKEY = "CommandOrControl+Shift+Space";
 const CHANGE_THRESHOLD = 2; // mean gray-level diff below this = "screen didn't change"
 const MAX_SEND_WIDTH = 1568; // long edge we send to the model
 
-const DEFAULTS = { intervalMin: 5, paused: false, zoom: 1.25 };
-const BASE_W = 360;
-const BASE_H = 520;
+const DEFAULTS = { intervalMin: 5, paused: false, textScale: 1.25, winW: 360, winH: 520, opacity: 1 };
+const OPACITY_MIN = 0.3; // never let the panel vanish completely
 const BAR_H = 44;
-const ZOOM_MIN = 0.8;
-const ZOOM_MAX = 2.5;
+const TEXT_MIN = 0.8;
+const TEXT_MAX = 2.5;
+const WIN_MIN_W = 280;
+const WIN_MIN_H = 240;
 let collapsed = false;
 let expandedHeight = 0;
 
@@ -69,9 +70,8 @@ function saveSettings() {
 
 function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
-  const zoom = settings.zoom;
-  const width = Math.min(Math.round(BASE_W * zoom), workArea.width - 32);
-  const height = Math.min(Math.round(BASE_H * zoom), workArea.height - 32);
+  const width = Math.min(settings.winW, workArea.width - 32);
+  const height = Math.min(settings.winH, workArea.height - 32);
   win = new BrowserWindow({
     width,
     height,
@@ -95,31 +95,43 @@ function createWindow() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   // Keep our own window out of the screenshots (macOS / Windows).
   win.setContentProtection(true);
-  win.webContents.on("did-finish-load", () => win.webContents.setZoomFactor(settings.zoom));
+  win.setOpacity(settings.opacity);
   win.loadFile(path.join(__dirname, "renderer", "index.html"));
 }
 
-// Grow/shrink the whole panel (text and window) together. step: +1, -1, or 0 to reset.
-function setZoom(step) {
-  const old = settings.zoom;
-  const next = step === 0 ? DEFAULTS.zoom : old + step * 0.1;
-  settings.zoom = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next)) * 100) / 100;
-  if (settings.zoom === old) return settings.zoom;
+// Chat text size only; the window stays put. step: +1, -1, or 0 to reset.
+function setTextScale(step) {
+  const next = step === 0 ? DEFAULTS.textScale : settings.textScale + step * 0.1;
+  settings.textScale = Math.round(Math.min(TEXT_MAX, Math.max(TEXT_MIN, next)) * 100) / 100;
   saveSettings();
-  win.webContents.setZoomFactor(settings.zoom);
+  return settings.textScale;
+}
 
+// Whole-panel see-through level, 0.3 (faint) to 1 (solid).
+function setOpacity(value) {
+  settings.opacity = Math.round(Math.min(1, Math.max(OPACITY_MIN, Number(value) || 1)) * 100) / 100;
+  win?.setOpacity(settings.opacity);
+  saveSettings();
+  return settings.opacity;
+}
+
+// Window size only. step: +1 (10% bigger), -1 (10% smaller), or 0 to reset.
+// Windows can't edge-resize a frameless transparent window, hence buttons.
+function resizeWindow(step) {
+  if (!win || collapsed) return;
   const { workArea } = screen.getDisplayMatching(win.getBounds());
   const [x, y] = win.getPosition();
   const [w, h] = win.getSize();
-  const ratio = settings.zoom / old;
-  const newW = Math.min(Math.round(w * ratio), workArea.width);
-  const newH = collapsed ? Math.round(BAR_H * settings.zoom) : Math.min(Math.round(h * ratio), workArea.height);
-  if (collapsed) expandedHeight = Math.round(expandedHeight * ratio);
+  const f = step > 0 ? 1.1 : 1 / 1.1;
+  const newW = Math.round(Math.min(workArea.width, Math.max(WIN_MIN_W, step === 0 ? DEFAULTS.winW : w * f)));
+  const newH = Math.round(Math.min(workArea.height, Math.max(WIN_MIN_H, step === 0 ? DEFAULTS.winH : h * f)));
   // Keep the bottom-right corner where it is, but stay on screen.
-  const newX = Math.max(workArea.x, x + w - newW);
-  const newY = Math.max(workArea.y, y + h - newH);
+  const newX = Math.max(workArea.x, Math.min(x + w - newW, workArea.x + workArea.width - newW));
+  const newY = Math.max(workArea.y, Math.min(y + h - newH, workArea.y + workArea.height - newH));
   win.setBounds({ x: newX, y: newY, width: newW, height: newH }, true);
-  return settings.zoom;
+  settings.winW = newW;
+  settings.winH = newH;
+  saveSettings();
 }
 
 function send(channel, payload) {
@@ -265,13 +277,15 @@ ipcMain.handle("buddy:open-file", (_e, file) => {
   // Only open files we wrote.
   if (path.resolve(file).startsWith(path.resolve(SHOTS_DIR) + path.sep)) return shell.openPath(file);
 });
-ipcMain.handle("buddy:zoom", (_e, step) => setZoom(step));
+ipcMain.handle("buddy:text-size", (_e, step) => setTextScale(step));
+ipcMain.on("buddy:resize", (_e, step) => resizeWindow(step));
+ipcMain.handle("buddy:opacity", (_e, value) => setOpacity(value));
 ipcMain.on("buddy:collapse", (_e, isCollapsed) => {
   if (!win) return;
   const [w, h] = win.getSize();
   collapsed = isCollapsed;
   if (collapsed) expandedHeight = h;
-  win.setSize(w, collapsed ? Math.round(BAR_H * settings.zoom) : expandedHeight || Math.round(BASE_H * settings.zoom), true);
+  win.setSize(w, collapsed ? BAR_H : expandedHeight || settings.winH, true);
 });
 ipcMain.on("buddy:hide", () => win?.hide());
 ipcMain.on("buddy:quit", () => app.quit());
