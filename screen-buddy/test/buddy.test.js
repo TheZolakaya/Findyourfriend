@@ -241,3 +241,22 @@ test("captureSize caps width at the chosen detail level, keeps aspect, never ups
   assert.strictEqual(normalizeShotWidth("1568"), 1568);
   assert.strictEqual(normalizeShotWidth(9999), 1280); // unknown -> default
 });
+
+test("text-only message sends no image (API buddy)", async () => {
+  const calls = [];
+  const b = new Buddy({ client: fakeClient("Sure!", calls) });
+  await b.look({ kind: "user", message: "just chatting", when: "10:00" });
+  const content = calls[0].messages.at(-1).content;
+  assert.deepStrictEqual(content.map((c) => c.type), ["text"]);
+  assert.match(content[0].text, /no screenshot/);
+  assert.doesNotMatch(b.history[0].content, /screenshot saved/);
+});
+
+test("text-only message sends no image (Claude Code buddy)", async () => {
+  const { b, events } = fakeBuddy();
+  await b.look({ kind: "user", message: "no pic", when: "10:00" });
+  await b.close();
+  const msg = events().find((e) => e.event === "message");
+  assert.deepStrictEqual(msg.types, ["text"]);
+  assert.match(msg.text, /No screenshot/);
+});
