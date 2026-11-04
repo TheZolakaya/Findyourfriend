@@ -8,12 +8,16 @@ const {
   ipcMain,
   Notification,
   screen,
+  session,
   shell,
 } = require("electron");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env"), quiet: true });
 
 const { Buddy, ClaudeCodeBuddy } = require("./buddy");
 const { toGray, frameDiff, captureSize, normalizeShotWidth, DEFAULT_SHOT_WIDTH } = require("./frames");
+const { transcribe, Speaker } = require("./voice/speech");
+const { parseUtterance } = require("./voice/wake");
+const { SpeechChunker } = require("./voice/chunker");
 
 const SHOTS_DIR = process.env.SCREEN_BUDDY_DIR || path.join(app.getPath("home"), "ScreenBuddy");
 const SETTINGS_FILE = path.join(app.getPath("userData"), "settings.json");
@@ -21,7 +25,7 @@ const LOG_FILE = path.join(SHOTS_DIR, "log.jsonl");
 const HOTKEY = "CommandOrControl+Shift+Space";
 const CHANGE_THRESHOLD = 2; // mean gray-level diff below this = "screen didn't change"
 
-const DEFAULTS = { intervalMin: 5, paused: false, textScale: 1.25, winW: 360, winH: 520, opacity: 1, shotWidth: DEFAULT_SHOT_WIDTH };
+const DEFAULTS = { intervalMin: 5, paused: false, textScale: 1.25, winW: 360, winH: 520, opacity: 1, shotWidth: DEFAULT_SHOT_WIDTH, voiceIn: false, voiceOut: false };
 const OPACITY_MIN = 0.3; // never let the panel vanish completely
 const BAR_H = 44;
 const TEXT_MIN = 0.8;
@@ -50,6 +54,9 @@ const buddy = useClaudeCode
       apiKey: process.env.ANTHROPIC_API_KEY,
       model: process.env.SCREEN_BUDDY_MODEL,
     });
+const speaker = new Speaker({ send, voice: process.env.SCREEN_BUDDY_VOICE || "bm_george" });
+const LISTEN_WINDOW_MS = 8000; // after a bare "Hey Buddy", the next thing said is the message
+let listenUntil = 0;
 const backendLabel = useClaudeCode
   ? `Claude Code session ${buddy.sessionId ? buddy.sessionId.slice(0, 8) + "…" : "(latest)"}`
   : buddy.live
@@ -193,6 +200,10 @@ async function checkIn(kind, message = "", { withShot = true } = {}) {
   }
   busy = true;
   send("buddy:thinking", true);
+  // A new question cuts off whatever the buddy was still saying.
+  if (kind === "user") speaker.stop();
+  const chunker = settings.voiceOut ? new SpeechChunker() : null;
+  const speakAll = (pieces) => pieces.forEach((p) => speaker.say(p));
   try {
     const when = new Date();
     let file = null;
@@ -219,7 +230,14 @@ async function checkIn(kind, message = "", { withShot = true } = {}) {
       when: when.toLocaleTimeString(),
       // Stream your answers into the panel as they're written. Check-ins
       // don't stream: most of them end up quiet.
-      onText: kind === "user" ? (t) => send("buddy:delta", { text: t }) : undefined,
+      // The voice starts on the first finished sentence.
+      onText:
+        kind === "user"
+          ? (t) => {
+              send("buddy:delta", { text: t });
+              if (chunker) speakAll(chunker.update(t));
+            }
+          : undefined,
     });
     fs.mkdirSync(SHOTS_DIR, { recursive: true });
     appendLog({ at: when.toISOString(), kind, file, message: message || null, reply: text, quiet });
@@ -229,6 +247,7 @@ async function checkIn(kind, message = "", { withShot = true } = {}) {
       return;
     }
     send("buddy:reply", { text, kind, file, at: when.toISOString() });
+    if (chunker) speakAll(chunker.finish(text));
     if (kind === "auto") alertUser(text);
   } catch (err) {
     console.error(err);
@@ -262,24 +281,80 @@ function schedule() {
   if (!settings.paused && settings.intervalMin > 0) {
     timer = setInterval(() => checkIn("auto"), settings.intervalMin * 60 * 1000);
   }
-  send("buddy:settings", { ...settings, live: buddy.live, backendLabel, shotsDir: SHOTS_DIR, hotkey: HOTKEY });
+  send("buddy:settings", settingsView());
 }
 
-ipcMain.handle("buddy:get-settings", () => ({
-  ...settings,
-  live: buddy.live,
-  backendLabel,
-  shotsDir: SHOTS_DIR,
-  hotkey: HOTKEY,
-}));
+function settingsView() {
+  return {
+    ...settings,
+    live: buddy.live,
+    backendLabel,
+    shotsDir: SHOTS_DIR,
+    hotkey: HOTKEY,
+    canHear: Boolean(process.env.GROQ_API_KEY),
+    hasKokoro: speaker.usesKokoro,
+  };
+}
+
+// ---- voice ------------------------------------------------------------------
+
+let lastVoiceError = 0;
+function voiceError(err) {
+  // One message per 30 s at most, so a dead network doesn't flood the chat.
+  if (Date.now() - lastVoiceError < 30000) return;
+  lastVoiceError = Date.now();
+  send("buddy:error", { text: err.message || String(err) });
+}
+
+// One utterance from the window's speech detector (a WAV). Speech that isn't
+// addressed to the buddy is dropped here and never logged.
+async function onUtterance(audio, { duringSpeech = false } = {}) {
+  if (!settings.voiceIn) return;
+  let heard;
+  try {
+    heard = await transcribe(audio);
+  } catch (err) {
+    return voiceError(err);
+  }
+  if (!heard.heard) return;
+  const listening = !duringSpeech && Date.now() < listenUntil;
+  const cmd = parseUtterance(heard.text, { listening });
+  // While the buddy talks (and just after), the mic may be hearing the buddy:
+  // only "Buddy, stop" counts.
+  if (duringSpeech && cmd.kind !== "stop") return;
+
+  if (cmd.kind === "stop") {
+    speaker.stop();
+    send("buddy:status", { text: "Okay, stopped." });
+  } else if (cmd.kind === "wake") {
+    listenUntil = Date.now() + LISTEN_WINDOW_MS;
+    send("buddy:status", { text: "Listening…" });
+  } else if (cmd.kind === "message") {
+    listenUntil = 0;
+    if (busy) return send("buddy:status", { text: "Still thinking about the last one…" });
+    const text = cmd.text || (cmd.withShot ? "What do you think?" : "");
+    if (!text) return;
+    send("buddy:heard", { text, withShot: cmd.withShot });
+    checkIn("user", text, { withShot: cmd.withShot });
+  }
+}
+
+ipcMain.handle("buddy:get-settings", () => settingsView());
 ipcMain.handle("buddy:set-settings", (_e, patch) => {
+  const wasVoiceOut = settings.voiceOut;
   settings = { ...settings, ...patch };
+  settings.voiceIn = Boolean(settings.voiceIn);
+  settings.voiceOut = Boolean(settings.voiceOut);
+  if (!settings.voiceOut) speaker.stop();
+  else if (!wasVoiceOut) speaker.warm();
   settings.intervalMin = Math.max(0, Number(settings.intervalMin) || 0);
   settings.shotWidth = normalizeShotWidth(settings.shotWidth);
   saveSettings();
   schedule();
-  return settings;
+  return settingsView();
 });
+ipcMain.on("voice:utterance", (_e, audio, meta) => onUtterance(audio, meta));
+ipcMain.on("voice:stop-request", () => speaker.stop());
 ipcMain.handle("buddy:send", (_e, message, withShot) =>
   checkIn("user", String(message || "").trim() || (withShot ? "What do you think?" : "Hey"), { withShot: Boolean(withShot) }),
 );
@@ -311,8 +386,22 @@ ipcMain.on("buddy:quit", () => app.quit());
 // Windows needs an app ID for desktop notifications to show.
 if (process.platform === "win32") app.setAppUserModelId("com.screenbuddy.app");
 
+// The window may use the microphone (for voice) and nothing else: no camera,
+// no other permissions. Screen capture goes through desktopCapturer instead.
+function lockPermissions() {
+  const audioOnly = (types) => Array.isArray(types) && types.length > 0 && types.every((t) => t === "audio");
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    callback(permission === "media" && audioOnly(details.mediaTypes));
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission, _origin, details) => {
+    return permission === "media" && details?.mediaType !== "video";
+  });
+}
+
 app.whenReady().then(() => {
+  lockPermissions();
   createWindow();
+  if (settings.voiceOut) speaker.warm();
   schedule();
   buddy.warm();
   globalShortcut.register(HOTKEY, () => {
@@ -331,6 +420,7 @@ app.on("before-quit", (e) => {
   if (shutdownDone) return;
   e.preventDefault();
   clearInterval(timer);
+  speaker.stop();
   send("buddy:status", { text: "Closing Claude…" });
   buddy
     .close()

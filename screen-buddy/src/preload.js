@@ -15,6 +15,13 @@ contextBridge.exposeInMainWorld("buddy", {
   resize: (step) => ipcRenderer.send("buddy:resize", step),
   setOpacity: (value) => ipcRenderer.invoke("buddy:opacity", value),
   quit: () => ipcRenderer.send("buddy:quit"),
+  voiceUtterance: (wav, meta) => ipcRenderer.send("voice:utterance", wav, meta),
+  voiceStop: () => ipcRenderer.send("voice:stop-request"),
+  // Only the voice channels can be listened to this way.
+  onVoice: (channel, fn) => {
+    if (["voice:play", "voice:stop", "voice:tts-busy", "voice:tts-idle"].includes(channel)) on(channel)(fn);
+  },
+  onHeard: on("buddy:heard"),
   onReply: on("buddy:reply"),
   onDelta: on("buddy:delta"),
   onStatus: on("buddy:status"),
