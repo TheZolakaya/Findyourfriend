@@ -6,10 +6,10 @@ const QUIET_TOKEN = "[quiet]";
 const MAX_HISTORY_TURNS = 20; // user+assistant pairs kept as text-only memory
 
 const SYSTEM_PROMPT = `You are Screen Buddy, a friendly AI companion who can see the user's screen.
-You get a screenshot of their whole screen along with each message.
+Auto check-ins always include a screenshot of their whole screen; their own messages include one only when they choose to send it.
 
 Two kinds of turns:
-1. USER MESSAGE: the user typed something to you. Answer it, using the screenshot for context. Be concise and conversational, like a friend looking over their shoulder. Point at specific things on screen when it helps.
+1. USER MESSAGE: the user typed something to you. Answer it, using the screenshot for context if one is attached. If none is attached, just chat; don't guess about what's on screen now. Be concise and conversational, like a friend looking over their shoulder. Point at specific things on screen when it helps.
 2. AUTO CHECK-IN: nobody asked you anything; you're just glancing at the screen on a timer. Only speak up if there's something genuinely worth saying: an error or bug you can see, a likely mistake, a useful tip for exactly what they're doing, or a quick friendly remark if it's been a while. If there's nothing worth interrupting for, reply with exactly ${QUIET_TOKEN} and nothing else. Most check-ins should be ${QUIET_TOKEN}. Never comment on the same thing twice.
 
 Keep replies short (1-4 sentences) unless the user asks for detail. Plain text, no markdown headings.
@@ -31,17 +31,16 @@ function buildUserContent({ kind, message, jpegBase64, when }) {
     kind === "auto"
       ? `AUTO CHECK-IN at ${when}. Nobody asked you anything.`
       : `USER MESSAGE at ${when}: ${message}`;
-  return [
-    { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } },
-    { type: "text", text: header },
-  ];
+  const content = [{ type: "text", text: jpegBase64 ? header : `${header}\n(no screenshot with this message)` }];
+  if (jpegBase64) content.unshift({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } });
+  return content;
 }
 
 // What we remember about a turn once its screenshot is gone (images are only
 // sent for the current turn to keep cost down).
 function historyText({ kind, message, when, file }) {
   const head = kind === "auto" ? `AUTO CHECK-IN at ${when}` : `USER MESSAGE at ${when}: ${message}`;
-  return `${head}\n(screenshot saved as ${file}, no longer attached)`;
+  return file ? `${head}\n(screenshot saved as ${file}, no longer attached)` : head;
 }
 
 class Buddy {
@@ -64,7 +63,7 @@ class Buddy {
       const text =
         kind === "auto"
           ? QUIET_TOKEN
-          : "(Sample mode: no API key set.) Screenshot saved. Add ANTHROPIC_API_KEY to screen-buddy/.env and restart to get real replies.";
+          : `(Sample mode: no API key set.)${file ? " Screenshot saved." : ""} Add ANTHROPIC_API_KEY to screen-buddy/.env and restart to get real replies.`;
       return this._remember({ kind, message, when, file }, text);
     }
 
@@ -289,7 +288,12 @@ class ClaudeCodeBuddy {
     if (jpegBase64) {
       content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } });
     }
-    content.push({ type: "text", text: `${head}\n\n(The attached image is my screen right now, also saved at ${file}.)` });
+    content.push({
+      type: "text",
+      text: jpegBase64
+        ? `${head}\n\n(The attached image is my screen right now, also saved at ${file}.)`
+        : `${head}\n\n(No screenshot with this message.)`,
+    });
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {

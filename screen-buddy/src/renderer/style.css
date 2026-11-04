@@ -114,6 +114,7 @@ textarea:focus { border-color: var(--accent); }
 .composer button {
   width: 40px; border-radius: 8px; background: var(--accent); font-size: 16px;
 }
+.composer button.alt { background: var(--them); border: 1px solid var(--border); }
 .composer button:disabled { opacity: 0.5; cursor: default; }
 
 .footer { flex: none; padding: 0 12px 6px; font-size: 10.5px; color: var(--muted); }

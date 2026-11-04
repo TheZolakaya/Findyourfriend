@@ -6,9 +6,11 @@ now and then, and chats with you about it.
 - **Always on top.** A small chat panel that stays above every app, including
   full-screen ones. You can drag it, collapse it to a bar, or hide it with
   **Ctrl/Cmd + Shift + Space**.
-- **Message it any time.** Type a question and press Enter. It takes a
-  screenshot, saves it, and your buddy answers with the screen in view
-  ("why is this test failing?", "does this layout look off?").
+- **Message it any time.** Type and press **Enter** (or ➤) to send just the
+  text, for a normal back-and-forth chat. Press **Ctrl+Enter** (or 📸) to send
+  it *with* a screenshot, so your buddy answers with the screen in view
+  ("why is this test failing?", "does this layout look off?"). Screenshots
+  only go out when you choose (plus auto check-ins, if they're on).
 - **Auto check-ins.** Every N minutes (1–30, or never) it takes a screenshot on
   its own. The buddy only speaks up when something is worth it, like an error
   on screen or a likely mistake. Then you get a desktop notification and the
