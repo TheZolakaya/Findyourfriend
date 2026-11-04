@@ -22,6 +22,10 @@ now and then, and chats with you about it.
   panel, not full 4K: Low (1024 wide, ≈800 tokens each), 720p (1280, ≈1.2k,
   the default), High (1568, ≈1.8k) or 1080p (1920, ≈2.8k). Smaller uses up
   less of your buddy's context; larger keeps small text readable.
+- **Talk to it, hands-free.** Turn on 🎙 and say **"Hey Buddy, …"** to send a
+  message, **"Buddy, look, …"** to send it with a screenshot, or **"Buddy,
+  stop"** to cut it off mid-sentence. Turn on 🔊 to hear replies spoken (as
+  George on Kokoro, or the built-in voice). See [Voice](#voice).
 - **Everything goes to a file.** Each screenshot is saved as a PNG in
   `~/ScreenBuddy/`. `log.jsonl` there records every message, reply, and
   screenshot path.
@@ -84,6 +88,46 @@ How it talks to the session:
 Tip: set the check-in interval to "never" or 15+ minutes, because every
 check-in is added to that session's history.
 
+## Voice
+
+Hands-free, for games that use every button. Both halves are off until you
+click 🎙 (listen) and 🔊 (speak) in the panel; the choice is remembered.
+
+| Say | Does |
+|---|---|
+| "Hey Buddy, what's the boss weak to?" | sends the message, text only |
+| "Buddy, look, where's the exit?" | sends it **with a screenshot** |
+| "Buddy, look." | sends a screenshot with "What do you think?" |
+| "Hey Buddy." (pause) "Where's the merchant?" | the next thing you say within 8 s is the message |
+| "Buddy, stop." (or **Esc**) | cuts the spoken reply off |
+
+How it works, and what leaves your computer:
+
+1. **On-device speech detection** listens to the mic. Silence and background
+   hum never leave your PC; only stretches that sound like talking do.
+2. Each stretch is transcribed by **Groq Whisper** (`whisper-large-v3-turbo`,
+   about $0.04 per hour of audio). Everything said near the mic while 🎙 is on
+   is sent there, which is why it's a toggle.
+3. Only transcripts that **start with the wake word** do anything. The rest are
+   thrown away and never logged.
+4. Replies are spoken by **Kokoro on Replicate** as George (speed 0.95), in
+   pieces of up to 520 characters, starting on the first finished sentence.
+   Kokoro is warmed up when 🔊 is turned on. Without `REPLICATE_API_TOKEN`,
+   or if Kokoro fails, the free built-in voice is used.
+5. While the buddy talks, and for half a second after, the mic only listens
+   for "Buddy, stop", so the buddy never hears itself as you. With speakers
+   instead of a headset this matters most.
+
+Setup: add `GROQ_API_KEY` and (for George) `REPLICATE_API_TOKEN` to
+`screen-buddy/.env`, restart, click 🎙 and 🔊. The first time, Windows may ask
+to allow microphone access.
+
+The speech code is the Nirmanakaya Reader's production stack, used unchanged
+from [`vendor/nkya-speech/`](vendor/nkya-speech/README.md): `kokoro.js` (voices,
+pinned Replicate versions, respellings, de-shouting) and `transcribeEcho.js`
+(drops Whisper's echoed hint on silence). `src/voice/` calls Groq and Replicate
+directly instead of through the Reader's Next.js routes.
+
 ## How it works
 
 ```
@@ -136,6 +180,9 @@ you hit Enter ───────┘                                          
 | `SCREEN_BUDDY_PROJECT_DIR` | cwd | Folder that session lives in |
 | `SCREEN_BUDDY_CLAUDE_MODEL` | session's model | e.g. `sonnet` for faster replies |
 | `SCREEN_BUDDY_IDLE_MIN` | `10` | Minutes idle before `claude` is shut down (0 = never) |
+| `GROQ_API_KEY` | – | Voice to text ("Hey Buddy") |
+| `REPLICATE_API_TOKEN` | – | George's voice (Kokoro); without it the built-in voice is used |
+| `SCREEN_BUDDY_VOICE` | `bm_george` | Kokoro voice (see `vendor/nkya-speech/kokoro.js`) |
 
 The check-in interval and pause state are saved between runs.
 

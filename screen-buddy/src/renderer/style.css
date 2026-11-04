@@ -44,7 +44,7 @@ html, body {
   cursor: grab;
 }
 .bar button { -webkit-app-region: no-drag; }
-.title { font-weight: 600; }
+.title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .spacer { flex: 1; }
 
 .dot {
@@ -69,6 +69,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .opacity input { width: 56px; accent-color: var(--accent); }
 .controls .spacer { flex: 1; }
 .icon:hover { background: rgba(255, 255, 255, 0.08); color: var(--fg); }
+.icon.off { opacity: 0.35; filter: grayscale(1); }
+.icon.on { background: rgba(124, 156, 255, 0.18); }
+.icon.hearing { background: rgba(95, 211, 141, 0.35); }
+.icon.talking { background: rgba(124, 156, 255, 0.4); animation: pulse 0.8s infinite alternate; }
 .link { color: var(--accent); padding: 0; }
 .link:hover { text-decoration: underline; }
 

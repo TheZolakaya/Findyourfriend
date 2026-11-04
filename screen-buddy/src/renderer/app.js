@@ -55,12 +55,69 @@ function renderSettings() {
   $("opacity").value = String(Math.round((settings.opacity ?? 1) * 100));
   $("interval").value = String(settings.intervalMin);
   $("shotWidth").value = String(settings.shotWidth);
+  renderVoice();
   $("pause").textContent = settings.paused ? "▶" : "⏸";
   $("pause").title = settings.paused ? "Resume auto check-ins" : "Pause auto check-ins";
   renderDot();
   $("footer").textContent =
     `${settings.backendLabel} · ${settings.hotkey} to show/hide · saves to ${settings.shotsDir}`;
 }
+
+// ---- voice ----------------------------------------------------------------
+
+const voice = window.ScreenBuddyVoice;
+
+function renderVoice() {
+  const v = voice.status();
+  const mic = $("mic");
+  mic.className = "icon " + (!settings.voiceIn || !settings.canHear ? "off" : v.hearing ? "hearing" : "on");
+  mic.title = !settings.canHear
+    ? "Voice needs GROQ_API_KEY in screen-buddy/.env"
+    : settings.voiceIn
+      ? 'Listening for "Hey Buddy" (click to stop listening)'
+      : 'Voice off (click to listen for "Hey Buddy")';
+  const sp = $("speak");
+  sp.className = "icon " + (!settings.voiceOut ? "off" : v.speaking ? "talking" : "on");
+  sp.title = settings.voiceOut
+    ? `Speaking replies${settings.hasKokoro ? " as George" : " (built-in voice: no REPLICATE_API_TOKEN)"}. Esc stops; click to mute.`
+    : "Replies are silent (click to speak them)";
+}
+
+// Start or stop the mic to match the setting.
+async function syncMic() {
+  const want = Boolean(settings.voiceIn && settings.canHear);
+  if (want === voice.status().listening) return;
+  try {
+    if (want) await voice.start();
+    else await voice.stop();
+  } catch (err) {
+    addStatus(`Couldn't use the microphone: ${err.message}`, "err");
+    settings = { ...settings, ...(await window.buddy.setSettings({ voiceIn: false })) };
+    renderSettings();
+  }
+}
+
+$("mic").addEventListener("click", async () => {
+  if (!settings.canHear) return addStatus("Voice needs GROQ_API_KEY in screen-buddy/.env, then restart.", "err");
+  settings = { ...settings, ...(await window.buddy.setSettings({ voiceIn: !settings.voiceIn })) };
+  renderSettings();
+  await syncMic();
+  addStatus(settings.voiceIn ? 'Listening. Say "Hey Buddy…", or "Buddy, look…" to send your screen.' : "Stopped listening.");
+});
+$("speak").addEventListener("click", async () => {
+  settings = { ...settings, ...(await window.buddy.setSettings({ voiceOut: !settings.voiceOut })) };
+  if (!settings.voiceOut) voice.stopSpeaking();
+  renderSettings();
+});
+// Esc cuts the buddy off mid-sentence (same as saying "Buddy, stop").
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && voice.status().speaking) {
+    window.buddy.voiceStop();
+    voice.stopSpeaking();
+  }
+});
+voice.onChange(() => renderVoice());
+window.buddy.onHeard(({ text, withShot }) => addMessage({ who: "me", text: "🎙 " + (withShot ? "📸 " : "") + text }));
 
 function renderDot() {
   const dot = $("dot");
@@ -171,6 +228,7 @@ window.buddy.onFocusInput(() => input.focus());
 (async () => {
   settings = await window.buddy.getSettings();
   renderSettings();
+  await syncMic();
   addStatus(
     settings.live
       ? "Hey! I'll glance at your screen now and then and only speak up if something's worth it. Message me any time."
